@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -65,6 +67,51 @@ def update_challenge(
 
 def publish_challenge(db: Session, challenge: Challenge) -> Challenge:
     challenge.status = "published"
+    db.commit()
+    db.refresh(challenge)
+    return challenge
+
+
+# ---------------------------------------------------------------------------
+# Student-facing lookups (US-3 / FR-C1)
+# ---------------------------------------------------------------------------
+
+
+def get_active_challenge_for_campus(db: Session, campus_id: str) -> Challenge | None:
+    """The challenge a student may currently join for their campus.
+
+    "Active" == the most recently starting *published* challenge for the campus.
+    Draft challenges are not joinable, and campus isolation is enforced by the
+    campus_id filter. Returns None when the campus has no published challenge.
+    """
+    return db.execute(
+        select(Challenge)
+        .where(Challenge.campus_id == campus_id, Challenge.status == "published")
+        .order_by(Challenge.start_date.desc(), Challenge.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def seed_dev_challenge(db: Session, campus_id: str = "csub") -> Challenge:
+    """Create (and publish) a dev challenge so the enroll flow can be exercised.
+
+    Idempotent: if the campus already has an active (published) challenge, that
+    one is returned untouched. Dev-only helper — there is no admin builder on
+    this branch to create a joinable challenge manually.
+    """
+    existing = get_active_challenge_for_campus(db, campus_id)
+    if existing is not None:
+        return existing
+
+    challenge = Challenge(
+        campus_id=campus_id,
+        name="Stranger Things Wellness Challenge",
+        semester="Fall 2025",
+        start_date=date(2025, 9, 1),
+        end_date=date(2025, 12, 15),
+        status="published",
+    )
+    db.add(challenge)
     db.commit()
     db.refresh(challenge)
     return challenge
