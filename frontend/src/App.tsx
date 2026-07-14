@@ -5,6 +5,7 @@ import { ThemeProvider } from "./theme/ThemeProvider";
 import { SignIn } from "./components/SignIn/SignIn";
 import { Landing } from "./components/Landing/Landing";
 import { AuthCallback } from "./components/AuthCallback/AuthCallback";
+import { Passport } from "./components/Passport/Passport";
 import { ChallengeBuilder } from "./components/admin/ChallengeBuilder/ChallengeBuilder";
 
 /** Sign-in route: if already authenticated, skip straight to the passport. */
@@ -36,6 +37,7 @@ export function App() {
             <Route path="/" element={<SignInRoute />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/home" element={<Landing />} />
+            <Route path="/passport" element={<Passport />} />
             <Route
               path="/admin"
               element={
