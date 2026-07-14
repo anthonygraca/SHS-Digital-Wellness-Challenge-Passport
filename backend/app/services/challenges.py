@@ -246,18 +246,14 @@ def add_assessment_item(
 
 def list_assessment_items(db: Session, task_id: int) -> list[AssessmentItem]:
     rows = (
-        db.execute(
-            select(AssessmentItem).where(AssessmentItem.task_id == task_id)
-        )
+        db.execute(select(AssessmentItem).where(AssessmentItem.task_id == task_id))
         .scalars()
         .all()
     )
     return list(rows)
 
 
-def get_assessment_item(
-    db: Session, task_id: int, item_id: int
-) -> AssessmentItem | None:
+def get_assessment_item(db: Session, task_id: int, item_id: int) -> AssessmentItem | None:
     return db.execute(
         select(AssessmentItem).where(
             AssessmentItem.id == item_id, AssessmentItem.task_id == task_id

@@ -215,9 +215,7 @@ class TestMixedItems:
         mcq_id = _add_mcq(client, challenge_id, task_id).json()["id"]
         ref_id = _add_reflection(client, challenge_id, task_id).json()["id"]
 
-        items = client.get(
-            f"/api/challenges/{challenge_id}/tasks/{task_id}/items"
-        ).json()
+        items = client.get(f"/api/challenges/{challenge_id}/tasks/{task_id}/items").json()
         ids = {i["id"] for i in items}
         assert {mcq_id, ref_id} == ids
 
@@ -239,9 +237,7 @@ class TestMixedItems:
         _add_mcq(client, challenge_id, task_id, outcome_tag="nutrition")
         _add_reflection(client, challenge_id, task_id, outcome_tag="mental-health")
 
-        items = client.get(
-            f"/api/challenges/{challenge_id}/tasks/{task_id}/items"
-        ).json()
+        items = client.get(f"/api/challenges/{challenge_id}/tasks/{task_id}/items").json()
         tags = {i["outcome_tag"] for i in items}
         assert tags == {"nutrition", "mental-health"}
 
@@ -283,9 +279,7 @@ class TestItemCRUD:
         )
         assert resp.status_code == 204
 
-        items = client.get(
-            f"/api/challenges/{challenge_id}/tasks/{task_id}/items"
-        ).json()
+        items = client.get(f"/api/challenges/{challenge_id}/tasks/{task_id}/items").json()
         assert all(i["id"] != item_id for i in items)
 
     def test_get_nonexistent_item_returns_404(self, client):

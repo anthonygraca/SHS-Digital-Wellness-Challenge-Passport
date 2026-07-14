@@ -203,7 +203,7 @@ def add_assessment_item(
     claims: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Attach an MCQ or reflection item to a task, tagged to a learning outcome (FR-B3)."""
+    """Attach an MCQ or reflection item to a task tagged to a learning outcome (FR-B3)."""
     _get_challenge_or_404(db, claims["campus_id"], challenge_id)
     task = _get_task_or_404(db, challenge_id, task_id)
     return svc.add_assessment_item(db, task, body)
