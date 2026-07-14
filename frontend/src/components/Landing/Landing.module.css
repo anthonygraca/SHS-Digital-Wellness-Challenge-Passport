@@ -72,3 +72,18 @@
   outline: 3px solid var(--wp-primary);
   outline-offset: 2px;
 }
+
+.adminLink {
+  display: block;
+  text-align: center;
+  margin: 0 0 16px;
+  color: var(--wp-primary);
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.adminLink:hover {
+  text-decoration: underline;
+}
+

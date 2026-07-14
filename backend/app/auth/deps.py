@@ -43,3 +43,26 @@ def require_current_student(request: Request) -> dict:
             },
         )
     return claims
+
+
+def require_admin(request: Request) -> dict:
+    """Dependency that enforces an admin/staff role (FR-A4).
+
+    Accepts any session whose ``affiliation`` contains "staff" or "admin"
+    (case-insensitive). Raises 401 when there is no valid session at all, and
+    403 when the session exists but carries a non-admin affiliation — so that
+    student-role callers get a clear "Forbidden" rather than "Not signed in".
+    """
+    claims = current_claims(request)
+    if claims is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not signed in",
+        )
+    affiliation = claims.get("affiliation", "").lower()
+    if "admin" not in affiliation and "staff" not in affiliation:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or staff role required",
+        )
+    return claims

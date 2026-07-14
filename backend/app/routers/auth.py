@@ -145,7 +145,14 @@ _MOCK_IDP_PAGE = """<!doctype html>
       box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
     }
     h1 { font-size: 18px; margin: 0 0 4px; }
-    p.sub { margin: 0 0 20px; color: #9aa0a6; font-size: 13px; }
+    p.sub { margin: 0 0 16px; color: #9aa0a6; font-size: 13px; }
+    .presets { display: flex; gap: 8px; margin-bottom: 16px; }
+    .preset {
+      flex: 1; padding: 8px 0; border-radius: 8px; border: 1px solid #3c4043;
+      background: #10141c; color: #e8eaed; font-size: 12px;
+      cursor: pointer; text-align: center;
+    }
+    .preset:hover { border-color: #b3261e; color: #ff4438; }
     label { display: block; font-size: 13px; margin: 14px 0 6px; }
     input[type="text"] {
       width: 100%; box-sizing: border-box; padding: 10px;
@@ -156,7 +163,7 @@ _MOCK_IDP_PAGE = """<!doctype html>
       display: flex; align-items: center;
       gap: 8px; margin-top: 16px; font-size: 13px;
     }
-    button {
+    button[type="submit"] {
       width: 100%; margin-top: 20px; padding: 12px;
       border: none; border-radius: 24px; background: #b3261e;
       color: #fff; font-weight: 600; font-size: 14px; cursor: pointer;
@@ -167,6 +174,18 @@ _MOCK_IDP_PAGE = """<!doctype html>
   <form method="post" action="/auth/acs">
     <h1>Mock Campus IdP</h1>
     <p class="sub">Dev stand-in for campus SAML SSO. Not shown in production.</p>
+    <div class="presets">
+      <button type="button" class="preset"
+        onclick="document.getElementById('subject').value='student@csub.edu';
+                 document.getElementById('affiliation').value='student'">
+        Student
+      </button>
+      <button type="button" class="preset"
+        onclick="document.getElementById('subject').value='staff@csub.edu';
+                 document.getElementById('affiliation').value='staff'">
+        Staff&nbsp;(admin)
+      </button>
+    </div>
     <input type="hidden" name="returnTo" value="__RETURN_TO__" />
     <label for="subject">SSO subject (eduPersonPrincipalName)</label>
     <input id="subject" type="text" name="subject" value="abc@csub.edu" />
