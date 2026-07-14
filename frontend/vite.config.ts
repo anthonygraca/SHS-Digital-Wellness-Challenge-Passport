@@ -34,6 +34,11 @@ export default defineConfig({
       },
       "/mock-idp": "http://127.0.0.1:8000",
       "/api": "http://127.0.0.1:8000",
+      // The enroll endpoints (US-3) live at /enrollment rather than under /api.
+      // Without this the dev server answers them with the SPA's index.html at
+      // HTTP 200, the client's `res.ok` check passes, and res.json() then chokes
+      // on HTML — surfacing as "we couldn't load your challenge" on the landing.
+      "/enrollment": "http://127.0.0.1:8000",
     },
   },
   test: {
