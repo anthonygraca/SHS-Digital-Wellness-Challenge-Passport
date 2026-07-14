@@ -33,8 +33,7 @@ def enrollment_status(
         return EnrollmentStatusOut(active_challenge=None, enrolled=False)
 
     enrolled = (
-        enrollment_svc.get_enrollment(db, claims["student_id"], challenge.id)
-        is not None
+        enrollment_svc.get_enrollment(db, claims["student_id"], challenge.id) is not None
     )
     return EnrollmentStatusOut(
         active_challenge=ActiveChallenge.model_validate(challenge), enrolled=enrolled

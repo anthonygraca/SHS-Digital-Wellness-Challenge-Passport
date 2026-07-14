@@ -7,9 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.challenge import Enrollment
 
 
-def get_enrollment(
-    db: Session, student_id: int, challenge_id: int
-) -> Enrollment | None:
+def get_enrollment(db: Session, student_id: int, challenge_id: int) -> Enrollment | None:
     return db.execute(
         select(Enrollment).where(
             Enrollment.student_id == student_id,
