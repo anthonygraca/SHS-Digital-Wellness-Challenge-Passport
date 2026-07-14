@@ -1,23 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.auth.deps import current_claims
+from app.auth.deps import require_current_student
 from app.db import get_db
 from app.schemas.passport import CheckInRequest, PassportOut, WeekOut
 from app.services.passport import PassportView, build_passport, record_manual_checkin
 
 router = APIRouter()
-
-
-def _require_claims(request: Request) -> dict:
-    claims = current_claims(request)
-    if claims is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not signed in"
-        )
-    return claims
 
 
 def _to_passport_out(view: PassportView) -> PassportOut:
@@ -46,13 +37,15 @@ def _to_passport_out(view: PassportView) -> PassportOut:
 
 
 @router.get("/api/passport", response_model=PassportOut)
-def get_passport(request: Request, db: Session = Depends(get_db)):
+def get_passport(
+    claims: dict = Depends(require_current_student), db: Session = Depends(get_db)
+):
     """The signed-in student's passport: week tiles with status + progress counts.
 
-    Identity comes from the session cookie (US-1); 401 if not signed in. 404 if the
-    student's campus has no active challenge. Serves US-5 (FR-C2, FR-C3).
+    Identity comes from the session cookie (US-1); 401 if not signed in, 403 if the
+    caller is not a current student (US-2 / FR-A3). 404 if the student's campus has
+    no published challenge. Serves US-5 (FR-C2, FR-C3).
     """
-    claims = _require_claims(request)
     view = build_passport(
         db, campus_id=claims["campus_id"], student_id=claims["student_id"]
     )
@@ -65,14 +58,16 @@ def get_passport(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/api/checkins", response_model=PassportOut)
 def create_checkin(
-    payload: CheckInRequest, request: Request, db: Session = Depends(get_db)
+    payload: CheckInRequest,
+    claims: dict = Depends(require_current_student),
+    db: Session = Depends(get_db),
 ):
     """Record a manual check-in for a week and return the refreshed passport.
 
     A demo stand-in for the QR scan (US-8) with manual unlock — any week can be
     completed directly. Idempotent, so re-tapping a completed week is harmless.
+    Gated on current-student eligibility (US-2 / FR-A3), same as the read path.
     """
-    claims = _require_claims(request)
     record_manual_checkin(
         db,
         campus_id=claims["campus_id"],

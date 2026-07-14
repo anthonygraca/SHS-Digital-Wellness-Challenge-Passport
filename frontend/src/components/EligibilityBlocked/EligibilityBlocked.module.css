@@ -1,0 +1,44 @@
+.center {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--wp-surface);
+}
+
+.card {
+  background: var(--wp-error-container);
+  color: var(--wp-on-error-container);
+  border-radius: 24px;
+  padding: 32px 28px;
+  text-align: center;
+  max-width: 360px;
+  width: 100%;
+}
+
+.heading {
+  font-family: var(--wp-font-display);
+  margin: 0 0 12px;
+}
+
+.body {
+  margin: 0 0 24px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.signout {
+  min-height: 48px;
+  padding: 0 28px;
+  border: none;
+  border-radius: 24px;
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.signout:focus-visible {
+  outline: 3px solid var(--wp-on-error-container);
+  outline-offset: 2px;
+}

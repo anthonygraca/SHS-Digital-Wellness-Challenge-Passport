@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.db import init_db
-from app.routers import auth, passport
+from app.routers import auth, challenges, enrollment, passport
 
 
 @asynccontextmanager
@@ -16,6 +16,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SHS Wellness Passport API", version="0.1.0", lifespan=lifespan)
 app.include_router(auth.router)
+app.include_router(enrollment.router)
+app.include_router(challenges.router)
 app.include_router(passport.router)
 
 

@@ -16,8 +16,10 @@ class WeekOut(BaseModel):
     caption: str
     activityType: str
     location: str
-    dateStart: date
-    dateEnd: date
+    # The admin builder (US-11) allows a task with no date window, so the SPA must
+    # render the tile without one.
+    dateStart: date | None = None
+    dateEnd: date | None = None
     prize: str
     required: bool
     status: WeekStatus

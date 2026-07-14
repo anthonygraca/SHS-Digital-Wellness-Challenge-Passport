@@ -28,12 +28,12 @@ export default defineConfig({
       // client-side SPA route. Without this bypass the proxy would forward the
       // post-login redirect to FastAPI, which 404s, and sign-in never completes.
       "/auth": {
-        target: "http://localhost:8000",
+        target: "http://127.0.0.1:8000",
         bypass: (req) =>
           req.url?.startsWith("/auth/callback") ? "/index.html" : undefined,
       },
-      "/mock-idp": "http://localhost:8000",
-      "/api": "http://localhost:8000",
+      "/mock-idp": "http://127.0.0.1:8000",
+      "/api": "http://127.0.0.1:8000",
     },
   },
   test: {

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.challenge import Challenge, CheckIn, Task
+
+WeekStatus = Literal["locked", "available", "complete"]
 
 
 @dataclass
@@ -17,11 +20,11 @@ class WeekView:
     caption: str
     activity_type: str
     location: str
-    date_start: date
-    date_end: date
+    date_start: date | None
+    date_end: date | None
     prize: str
     is_required: bool
-    status: str  # "locked" | "available" | "complete"
+    status: WeekStatus
 
 
 @dataclass
@@ -35,12 +38,16 @@ class PassportView:
 
 
 def get_active_challenge(db: Session, campus_id: str) -> Challenge | None:
-    """The active challenge for a campus (newest first if more than one)."""
+    """The published challenge for a campus (newest first if more than one).
+
+    Students only ever see a ``published`` challenge; a ``draft`` is still being
+    authored in the admin builder (US-11) and must stay invisible here.
+    """
     return (
         db.execute(
             select(Challenge)
-            .where(Challenge.campus_id == campus_id, Challenge.status == "active")
-            .order_by(Challenge.starts_on.desc())
+            .where(Challenge.campus_id == campus_id, Challenge.status == "published")
+            .order_by(Challenge.start_date.desc())
         )
         .scalars()
         .first()
@@ -50,13 +57,16 @@ def get_active_challenge(db: Session, campus_id: str) -> Challenge | None:
 def build_passport(
     db: Session, *, campus_id: str, student_id: int
 ) -> PassportView | None:
-    """Assemble a student's passport view for their campus's active challenge.
+    """Assemble a student's passport view for their campus's published challenge.
 
     Status is *derived*, never stored (architecture-plan.md:141,149): a week is
     ``complete`` when the student has a check-in for it; otherwise the earliest
     not-yet-complete week is ``available`` and every later week is ``locked``
-    (sequential unlock, matching the prototype). Returns ``None`` when no active
+    (sequential unlock, matching the prototype). Returns ``None`` when no published
     challenge exists for the campus.
+
+    A task's ``position`` (its 1-based order in the admin builder) is what the
+    passport surfaces as the week number.
     """
     challenge = get_active_challenge(db, campus_id)
     if challenge is None:
@@ -64,7 +74,7 @@ def build_passport(
 
     tasks = list(
         db.execute(
-            select(Task).where(Task.challenge_id == challenge.id).order_by(Task.week_no)
+            select(Task).where(Task.challenge_id == challenge.id).order_by(Task.position)
         ).scalars()
     )
 
@@ -82,6 +92,7 @@ def build_passport(
     weeks: list[WeekView] = []
     available_assigned = False
     for task in tasks:
+        status: WeekStatus
         if task.id in completed_ids:
             status = "complete"
         elif not available_assigned:
@@ -91,15 +102,15 @@ def build_passport(
             status = "locked"
         weeks.append(
             WeekView(
-                week_no=task.week_no,
+                week_no=task.position,
                 title=task.title,
                 caption=task.caption,
                 activity_type=task.activity_type,
                 location=task.location,
-                date_start=task.date_start,
-                date_end=task.date_end,
+                date_start=task.date_window_start,
+                date_end=task.date_window_end,
                 prize=task.prize,
-                is_required=task.is_required,
+                is_required=task.required,
                 status=status,
             )
         )
@@ -129,9 +140,18 @@ def record_manual_checkin(
     if challenge is None:
         return False
 
-    task = db.execute(
-        select(Task).where(Task.challenge_id == challenge.id, Task.week_no == week_no)
-    ).scalar_one_or_none()
+    # `.first()`, not `.scalar_one_or_none()`: positions are kept gapless and unique
+    # by the reorder service, but no DB constraint enforces it — a duplicate must not
+    # turn a check-in into a 500.
+    task = (
+        db.execute(
+            select(Task)
+            .where(Task.challenge_id == challenge.id, Task.position == week_no)
+            .order_by(Task.id)
+        )
+        .scalars()
+        .first()
+    )
     if task is None:
         return False
 

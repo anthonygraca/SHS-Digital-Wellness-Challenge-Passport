@@ -9,9 +9,10 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
@@ -21,49 +22,89 @@ def _utcnow() -> datetime:
 
 
 class Challenge(Base):
-    """A themed multi-week wellness challenge (architecture-plan.md §5).
+    """An admin-authored challenge for a given semester (FR-B1).
 
-    A challenge is *data/config*, not code: an admin authors the weeks, dates, and
-    theme per semester (FR-B). Scoped by ``campus_id`` for multi-tenancy (FR-A5).
+    Starts in "draft" status; transitions to "published" when the admin
+    explicitly publishes. Campus isolation is enforced by campus_id on every
+    row — no campus can touch another's challenges.
+
+    Only a "published" challenge is visible to students in their passport (US-5);
+    "draft" is admin-only, still being authored.
     """
 
     __tablename__ = "challenges"
+    __table_args__ = (
+        UniqueConstraint(
+            "campus_id",
+            "name",
+            "semester",
+            name="uq_challenge_campus_name_sem",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     campus_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    theme_id: Mapped[str] = mapped_column(String(64), nullable=False)
     semester: Mapped[str] = mapped_column(String(64), nullable=False)
-    starts_on: Mapped[date] = mapped_column(Date, nullable=False)
-    ends_on: Mapped[date] = mapped_column(Date, nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    # Drives the passport's visual theme (US-5). Empty string = default theme.
+    theme_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+
+    # "draft" | "published"
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    tasks: Mapped[list[Task]] = relationship(
+        "Task",
+        back_populates="challenge",
+        order_by="Task.position",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class Task(Base):
-    """One week/task within a challenge — the passport "tiles" (architecture-plan.md §5).
+    """An ordered weekly task within a challenge (FR-B2).
 
-    Ordered by ``week_no``. ``is_required`` drives prize eligibility (US-7); the date
-    window is display metadata for US-5 (status is derived by sequential unlock).
+    `position` is the 1-based display order. Reordering is done by updating
+    positions in a single service call so the order stays gapless. The passport
+    (US-5) surfaces `position` as the week number and derives status from it by
+    sequential unlock.
     """
 
     __tablename__ = "tasks"
-    __table_args__ = (
-        UniqueConstraint("challenge_id", "week_no", name="uq_task_challenge_week"),
-    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     challenge_id: Mapped[int] = mapped_column(
-        ForeignKey("challenges.id"), nullable=False, index=True
+        ForeignKey("challenges.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    week_no: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    caption: Mapped[str] = mapped_column(String(1024), nullable=False)
-    activity_type: Mapped[str] = mapped_column(String(128), nullable=False)
-    location: Mapped[str] = mapped_column(String(255), nullable=False)
-    date_start: Mapped[date] = mapped_column(Date, nullable=False)
-    date_end: Mapped[date] = mapped_column(Date, nullable=False)
-    prize: Mapped[str] = mapped_column(String(255), nullable=False)
-    is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    caption: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    activity_type: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    location: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    date_window_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    date_window_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    prize: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    challenge: Mapped[Challenge] = relationship("Challenge", back_populates="tasks")
 
 
 class CheckIn(Base):
@@ -84,7 +125,7 @@ class CheckIn(Base):
         ForeignKey("students.id"), nullable=False, index=True
     )
     task_id: Mapped[int] = mapped_column(
-        ForeignKey("tasks.id"), nullable=False, index=True
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
     )
     ts: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False

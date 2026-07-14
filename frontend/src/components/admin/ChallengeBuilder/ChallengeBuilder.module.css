@@ -1,0 +1,380 @@
+/* ── Layout ───────────────────────────────────────────────────── */
+.page {
+  min-height: 100dvh;
+  background: var(--wp-surface);
+  color: var(--wp-on-surface);
+  padding: 0 0 64px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--wp-surface-container);
+  border-bottom: 1px solid var(--wp-outline-variant);
+  gap: 12px;
+}
+
+.topbar h1 {
+  font-family: var(--wp-font-display);
+  font-size: 20px;
+  margin: 0;
+  color: var(--wp-on-surface);
+}
+
+.content {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────── */
+.btnPrimary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 20px;
+  min-height: 40px;
+  border: none;
+  border-radius: 20px;
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btnPrimary:hover { filter: brightness(1.1); }
+.btnPrimary:focus-visible { outline: 3px solid var(--wp-primary); outline-offset: 3px; }
+.btnPrimary:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+
+.btnSecondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 18px;
+  min-height: 40px;
+  border: 1px solid var(--wp-outline);
+  border-radius: 20px;
+  background: transparent;
+  color: var(--wp-primary);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btnSecondary:hover { background: color-mix(in srgb, var(--wp-primary) 8%, transparent); }
+.btnSecondary:focus-visible { outline: 3px solid var(--wp-primary); outline-offset: 3px; }
+
+.btnGhost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--wp-on-surface-variant);
+  font-size: 13px;
+  cursor: pointer;
+}
+.btnGhost:hover { background: color-mix(in srgb, var(--wp-on-surface) 8%, transparent); }
+.btnGhost:focus-visible { outline: 2px solid var(--wp-primary); }
+
+.btnDanger {
+  composes: btnGhost;
+  color: var(--wp-error);
+}
+
+/* ── Challenge list ───────────────────────────────────────────── */
+.listHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.listHeader h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.challengeCard {
+  background: var(--wp-surface-container);
+  border-radius: 16px;
+  padding: 16px 18px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+.challengeCard:hover { border-color: var(--wp-outline); }
+.challengeCard:focus-visible { outline: 3px solid var(--wp-primary); border-radius: 16px; }
+
+.challengeCardInfo h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.challengeCardInfo p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--wp-on-surface-variant);
+}
+
+.statusBadge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.statusDraft {
+  background: color-mix(in srgb, var(--wp-outline) 20%, transparent);
+  color: var(--wp-on-surface-variant);
+}
+.statusPublished {
+  background: color-mix(in srgb, var(--wp-primary) 18%, transparent);
+  color: var(--wp-primary);
+}
+
+.empty {
+  text-align: center;
+  color: var(--wp-on-surface-variant);
+  padding: 40px 0;
+  font-size: 15px;
+}
+
+/* ── Challenge detail ─────────────────────────────────────────── */
+.detailHeader {
+  margin-bottom: 20px;
+}
+
+.backBtn {
+  composes: btnGhost;
+  margin-bottom: 12px;
+  padding-left: 0;
+}
+
+.detailMeta {
+  background: var(--wp-surface-container);
+  border-radius: 16px;
+  padding: 16px 18px;
+  margin-bottom: 4px;
+}
+
+.detailMeta h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.metaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  font-size: 13px;
+  color: var(--wp-on-surface-variant);
+  margin-bottom: 12px;
+}
+
+.detailActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+/* ── Task list ────────────────────────────────────────────────── */
+.taskSection h3 {
+  margin: 20px 0 10px;
+  font-size: 16px;
+}
+
+.taskList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.taskItem {
+  background: var(--wp-surface-container);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 2px solid transparent;
+  transition: border-color 0.12s, opacity 0.12s;
+}
+
+.taskItem[data-dragging="true"] {
+  opacity: 0.4;
+}
+
+.taskItem[data-over="true"] {
+  border-color: var(--wp-primary);
+}
+
+.dragHandle {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 2px;
+  cursor: grab;
+  color: var(--wp-outline);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.dragHandle:active { cursor: grabbing; }
+.dragHandle span {
+  display: block;
+  width: 16px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.taskBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.taskTitle {
+  font-weight: 600;
+  font-size: 14px;
+  margin: 0 0 3px;
+}
+
+.taskMeta {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.taskActions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.reqBadge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--wp-primary) 14%, transparent);
+  color: var(--wp-primary);
+  letter-spacing: 0.04em;
+}
+
+/* ── Modal overlay ────────────────────────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: grid;
+  place-items: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.modal {
+  background: var(--wp-surface);
+  border-radius: 20px;
+  padding: 24px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 92dvh;
+  overflow-y: auto;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.modal h2 {
+  margin: 0 0 20px;
+  font-size: 18px;
+}
+
+/* ── Forms ────────────────────────────────────────────────────── */
+.fieldGroup {
+  margin-bottom: 14px;
+}
+
+.fieldGroup label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: var(--wp-on-surface-variant);
+}
+
+.fieldGroup input[type="text"],
+.fieldGroup input[type="date"],
+.fieldGroup textarea,
+.fieldGroup select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--wp-outline-variant);
+  background: var(--wp-surface-container);
+  color: var(--wp-on-surface);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.fieldGroup input:focus,
+.fieldGroup textarea:focus,
+.fieldGroup select:focus {
+  outline: 2px solid var(--wp-primary);
+  outline-offset: 1px;
+  border-color: var(--wp-primary);
+}
+
+.fieldGroup textarea {
+  resize: vertical;
+  min-height: 72px;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.checkRow input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--wp-primary);
+  cursor: pointer;
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.error {
+  color: var(--wp-error);
+  font-size: 13px;
+  margin-bottom: 12px;
+}

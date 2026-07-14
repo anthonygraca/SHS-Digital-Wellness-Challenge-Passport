@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from app.models.challenge import CheckIn, Task
+from app.models.challenge import Challenge, CheckIn, Task
 from app.models.student import Student
 from app.services.seed import seed_demo_challenge
 
@@ -26,9 +26,10 @@ def _student_id(db_sessionmaker):
 
 
 def _task_ids_by_week(db_sessionmaker):
+    """Map week number -> task id. A task's `position` is its week number (US-11)."""
     with db_sessionmaker() as db:
-        tasks = db.execute(select(Task).order_by(Task.week_no)).scalars()
-        return {t.week_no: t.id for t in tasks}
+        tasks = db.execute(select(Task).order_by(Task.position)).scalars()
+        return {t.position: t.id for t in tasks}
 
 
 def _complete_weeks(db_sessionmaker, student_id, week_nos):
@@ -54,6 +55,43 @@ def test_passport_requires_auth(client, db_sessionmaker):
 def test_passport_404_when_no_active_challenge(client):
     # Signed in, but nothing seeded → no challenge for the campus.
     _sign_in(client)
+    assert client.get("/api/passport").status_code == 404
+
+
+# --- US-2 (FR-A3): the passport is gated on current-student eligibility ----------
+
+
+def test_passport_403_for_non_current_student(client, db_sessionmaker):
+    _seed_challenge(db_sessionmaker)
+    _sign_in(client, subject="alum@csub.edu", affiliation="alum")
+
+    resp = client.get("/api/passport")
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "not_current_student"
+
+
+def test_checkin_403_for_non_current_student(client, db_sessionmaker):
+    _seed_challenge(db_sessionmaker)
+    _sign_in(client, subject="alum@csub.edu", affiliation="alum")
+
+    resp = client.post("/api/checkins", json={"weekNo": 1})
+    assert resp.status_code == 403
+    # The gate runs before the service, so nothing is recorded.
+    with db_sessionmaker() as db:
+        assert list(db.execute(select(CheckIn)).scalars()) == []
+
+
+# --- Draft challenges stay invisible to students (US-11 authoring) ---------------
+
+
+def test_passport_404_when_challenge_is_still_draft(client, db_sessionmaker):
+    _seed_challenge(db_sessionmaker)
+    with db_sessionmaker() as db:
+        challenge = db.execute(select(Challenge)).scalars().one()
+        challenge.status = "draft"
+        db.commit()
+    _sign_in(client)
+
     assert client.get("/api/passport").status_code == 404
 
 

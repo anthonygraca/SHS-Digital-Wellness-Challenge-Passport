@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useSession } from "../../auth/SessionProvider";
+import { EligibilityBlocked } from "../EligibilityBlocked/EligibilityBlocked";
 import { checkIn, fetchPassport } from "../../passport/passport";
 import type { Passport as PassportData, WeekStatus } from "../../types/passport";
 import { BoltIcon, CheckCircleIcon, LockIcon } from "../icons";
@@ -18,14 +19,24 @@ function StatusIcon({ status }: { status: WeekStatus }) {
   return <LockIcon size={18} />;
 }
 
-/** "Sep 2 – Sep 6" from two ISO dates (UTC so the day never shifts by tz). */
-function formatWindow(startIso: string, endIso: string): string {
+/**
+ * "Sep 2 – Sep 6" from two ISO dates (UTC so the day never shifts by tz). Either
+ * end may be absent — the admin builder (US-11) allows a task with no date window,
+ * or only one end of one — so fall back to whatever is known.
+ */
+function formatWindow(
+  startIso: string | null,
+  endIso: string | null,
+): string {
   const fmt = new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     timeZone: "UTC",
   });
-  return `${fmt.format(new Date(startIso))} – ${fmt.format(new Date(endIso))}`;
+  const start = startIso ? fmt.format(new Date(startIso)) : null;
+  const end = endIso ? fmt.format(new Date(endIso)) : null;
+  if (start && end) return `${start} – ${end}`;
+  return start ?? end ?? "Dates TBA";
 }
 
 type OnCheckIn = (weekNo: number) => Promise<void> | void;
@@ -186,6 +197,10 @@ interface PassportProps {
  * Passport home (US-5 / FR-C2, FR-C3). Guards against being viewed signed-out,
  * loads the student's weeks + progress, and records manual check-ins. fetchData
  * and checkInFn are injectable for tests.
+ *
+ * US-2 (FR-A3): current-student eligibility gate. A non-current student is blocked
+ * with a friendly message and never sees a passport — checked before the fetch so
+ * an ineligible session makes no request. The API enforces this independently.
  */
 export function Passport({
   fetchData = fetchPassport,
@@ -196,7 +211,7 @@ export function Passport({
   const [dataLoading, setDataLoading] = useState(true);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session || !session.isCurrentStudent) return;
     let active = true;
     void fetchData().then((data) => {
       if (!active) return;
@@ -215,6 +230,7 @@ export function Passport({
 
   if (loading) return <div className={styles.center}>Loading…</div>;
   if (!session) return <Navigate to="/" replace />;
+  if (!session.isCurrentStudent) return <EligibilityBlocked />;
 
   return (
     <>
