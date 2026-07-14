@@ -17,6 +17,10 @@ export function Landing() {
   if (!session) return <Navigate to="/" replace />;
   if (!session.isCurrentStudent) return <EligibilityBlocked />;
 
+  const isAdmin =
+    session.affiliation.toLowerCase().includes("admin") ||
+    session.affiliation.toLowerCase().includes("staff");
+
   return (
     <main className={styles.center}>
       <div className={styles.card}>
@@ -25,6 +29,11 @@ export function Landing() {
           Signed in as <strong>{session.affiliation}</strong>
         </p>
         <p className={styles.subject}>{session.subject}</p>
+        {isAdmin && (
+          <a href="/admin" className={styles.adminLink}>
+            Challenge Builder →
+          </a>
+        )}
         {/* TODO(US-3): wire this to POST /enrollment for the active challenge. */}
         <button type="button" className={styles.join} disabled>
           Join the Challenge
