@@ -122,7 +122,7 @@ class CheckIn(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     student_id: Mapped[int] = mapped_column(
-        ForeignKey("students.id"), nullable=False, index=True
+        ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True
     )
     task_id: Mapped[int] = mapped_column(
         ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
@@ -132,3 +132,32 @@ class CheckIn(Base):
     )
     method: Mapped[str] = mapped_column(String(32), nullable=False)
     verified_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class Enrollment(Base):
+    """A student's enrollment in a challenge (FR-C1 / US-3).
+
+    Links a student to the challenge they joined. The composite unique
+    constraint on (student_id, challenge_id) makes enrollment idempotent — a
+    student cannot enroll in the same challenge twice.
+    """
+
+    __tablename__ = "enrollments"
+    __table_args__ = (
+        UniqueConstraint(
+            "student_id",
+            "challenge_id",
+            name="uq_enrollment_student_challenge",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    challenge_id: Mapped[int] = mapped_column(
+        ForeignKey("challenges.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    enrolled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )

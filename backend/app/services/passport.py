@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.challenge import Challenge, CheckIn, Task
+from app.models.challenge import CheckIn, Task
+from app.services.challenges import get_active_challenge_for_campus
 
 WeekStatus = Literal["locked", "available", "complete"]
 
@@ -37,23 +38,6 @@ class PassportView:
     weeks: list[WeekView]
 
 
-def get_active_challenge(db: Session, campus_id: str) -> Challenge | None:
-    """The published challenge for a campus (newest first if more than one).
-
-    Students only ever see a ``published`` challenge; a ``draft`` is still being
-    authored in the admin builder (US-11) and must stay invisible here.
-    """
-    return (
-        db.execute(
-            select(Challenge)
-            .where(Challenge.campus_id == campus_id, Challenge.status == "published")
-            .order_by(Challenge.start_date.desc())
-        )
-        .scalars()
-        .first()
-    )
-
-
 def build_passport(
     db: Session, *, campus_id: str, student_id: int
 ) -> PassportView | None:
@@ -68,7 +52,7 @@ def build_passport(
     A task's ``position`` (its 1-based order in the admin builder) is what the
     passport surfaces as the week number.
     """
-    challenge = get_active_challenge(db, campus_id)
+    challenge = get_active_challenge_for_campus(db, campus_id)
     if challenge is None:
         return None
 
@@ -136,7 +120,7 @@ def record_manual_checkin(
     completed directly. Idempotent — returns False if the task is missing or the student
     already has a check-in for it, True when a new one is recorded.
     """
-    challenge = get_active_challenge(db, campus_id)
+    challenge = get_active_challenge_for_campus(db, campus_id)
     if challenge is None:
         return False
 

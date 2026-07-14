@@ -13,6 +13,7 @@ from app.models.challenge import Challenge, Task
 _DEMO_CAMPUS = "csub"
 _DEMO_THEME = "stranger-things"
 _DEMO_SEMESTER = "Fall 2026"
+_DEMO_NAME = "Stranger Things Wellness Challenge"
 
 _DEMO_WEEKS: list[dict] = [
     {
@@ -103,18 +104,31 @@ _DEMO_WEEKS: list[dict] = [
 def seed_demo_challenge(db: Session) -> Challenge | None:
     """Idempotently seed the demo Stranger Things challenge for the demo campus.
 
-    Returns the existing or newly created challenge; a no-op if one already exists,
-    so app restarts never duplicate it.
+    Returns the existing or newly created challenge; a no-op if the demo challenge
+    already exists, so app restarts never duplicate it.
+
+    Matches on the demo challenge's exact identity (campus + name + semester — the
+    columns of uq_challenge_campus_name_sem) rather than on campus alone: since
+    US-11 an admin can author other challenges for the same campus, and those must
+    neither be mistaken for the demo seed nor make this lookup ambiguous.
     """
-    existing = db.execute(
-        select(Challenge).where(Challenge.campus_id == _DEMO_CAMPUS)
-    ).scalar_one_or_none()
+    existing = (
+        db.execute(
+            select(Challenge).where(
+                Challenge.campus_id == _DEMO_CAMPUS,
+                Challenge.name == _DEMO_NAME,
+                Challenge.semester == _DEMO_SEMESTER,
+            )
+        )
+        .scalars()
+        .first()
+    )
     if existing is not None:
         return existing
 
     challenge = Challenge(
         campus_id=_DEMO_CAMPUS,
-        name="Stranger Things Wellness Challenge",
+        name=_DEMO_NAME,
         theme_id=_DEMO_THEME,
         semester=_DEMO_SEMESTER,
         start_date=_DEMO_WEEKS[0]["date_window_start"],

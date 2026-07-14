@@ -35,11 +35,15 @@ def test_is_current_student_false_for_non_students(affiliation):
 # --- US-2 Gherkin scenario 1: current student passes the eligibility gate --------
 
 
-def test_current_student_may_enroll(client):
+def test_current_student_passes_eligibility_gate(client):
+    """A current student is not blocked by the gate. With no challenge seeded the
+    enrollment logic responds 404 no_active_challenge — proving we got *past* the
+    401/403 gate into the enrollment body. Enrollment itself is covered in
+    test_enrollment.py."""
     _sign_in(client, "student")
     resp = client.post("/enrollment")
-    assert resp.status_code == 200
-    assert resp.json() == {"eligible": True}
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "no_active_challenge"
 
 
 # --- US-2 Gherkin scenario 2: non-current student is blocked ---------------------
