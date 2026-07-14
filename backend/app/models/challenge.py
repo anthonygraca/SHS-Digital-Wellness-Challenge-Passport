@@ -70,10 +70,10 @@ class Challenge(Base):
     )
 
     # Relationships
-    tasks: Mapped[list["Task"]] = relationship(
+    tasks: Mapped[list[Task]] = relationship(
         "Task", back_populates="challenge", cascade="all, delete-orphan"
     )
-    enrollments: Mapped[list["Enrollment"]] = relationship(
+    enrollments: Mapped[list[Enrollment]] = relationship(
         "Enrollment", back_populates="challenge", cascade="all, delete-orphan"
     )
 
@@ -105,8 +105,8 @@ class Task(Base):
     )
 
     # Relationships
-    challenge: Mapped["Challenge"] = relationship("Challenge", back_populates="tasks")
-    check_ins: Mapped[list["CheckIn"]] = relationship(
+    challenge: Mapped[Challenge] = relationship("Challenge", back_populates="tasks")
+    check_ins: Mapped[list[CheckIn]] = relationship(
         "CheckIn", back_populates="task", cascade="all, delete-orphan"
     )
 
@@ -120,7 +120,9 @@ class Enrollment(Base):
 
     __tablename__ = "enrollments"
     __table_args__ = (
-        UniqueConstraint("student_id", "challenge_id", name="uq_enrollment_student_challenge"),
+        UniqueConstraint(
+            "student_id", "challenge_id", name="uq_enrollment_student_challenge"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -135,7 +137,7 @@ class Enrollment(Base):
     )
 
     # Relationships
-    challenge: Mapped["Challenge"] = relationship("Challenge", back_populates="enrollments")
+    challenge: Mapped[Challenge] = relationship("Challenge", back_populates="enrollments")
 
 
 class CheckIn(Base):
@@ -166,4 +168,4 @@ class CheckIn(Base):
     )
 
     # Relationships
-    task: Mapped["Task"] = relationship("Task", back_populates="check_ins")
+    task: Mapped[Task] = relationship("Task", back_populates="check_ins")

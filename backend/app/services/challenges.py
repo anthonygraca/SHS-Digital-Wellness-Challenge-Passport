@@ -72,9 +72,7 @@ def calculate_week_status(
     return WeekStatus.AVAILABLE
 
 
-def calculate_progress(
-    tasks: list[Task], completed_task_ids: set[int]
-) -> ProgressOut:
+def calculate_progress(tasks: list[Task], completed_task_ids: set[int]) -> ProgressOut:
     """Calculate progress summary for the passport countdown (FR-C3, FR-C5).
 
     Prize eligibility is derived: complete when all required tasks are checked in.
@@ -95,7 +93,9 @@ def calculate_progress(
     )
 
 
-def get_student_passport(db: Session, student_id: int, campus_id: str) -> PassportOut | None:
+def get_student_passport(
+    db: Session, student_id: int, campus_id: str
+) -> PassportOut | None:
     """Build the complete passport view for a student (UC-2).
 
     Returns None if:

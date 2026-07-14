@@ -5,9 +5,8 @@ Creates a 7-week challenge with tasks at different stages:
 - 2 available weeks (current/past)
 - 2 locked weeks (future)
 """
-from datetime import date, timedelta
 
-from sqlalchemy.orm import Session
+from datetime import date, timedelta
 
 from app.db import SessionLocal, init_db
 from app.models.challenge import Challenge, CheckIn, Enrollment, Task
@@ -153,8 +152,8 @@ def seed_test_data():
         print(f"  - Student: {student.sso_subject} (ID: {student.id})")
         print(f"  - Challenge: {challenge.name} (ID: {challenge.id})")
         print(f"  - Tasks: {len(tasks)} weeks")
-        print(f"  - Completed: 3 of 7 weeks")
-        print(f"  - Status: 3 complete, 2 available, 2 locked")
+        print("  - Completed: 3 of 7 weeks")
+        print("  - Status: 3 complete, 2 available, 2 locked")
 
     except Exception as e:
         db.rollback()
