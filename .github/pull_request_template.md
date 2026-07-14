@@ -61,7 +61,7 @@ Suggested review order and key files to focus on:
 -   [ ] My changes generate no new warnings.
 -   [ ] I have added tests that prove my fix is effective or that my feature works.
 -   [ ] Acceptance criteria (Gherkin in `features/`) are bound by pytest-bdd step defs and pass at the appropriate tier (`make test-api` / `make test-e2e`). If E2E coverage is deferred, note which story picks it up.
--   [ ] The Bitbucket pipeline is green (commit lint `[CHP-N]`, codegen drift, typecheck, test-api).
+-   [ ] The Github pipeline is green (commit lint, codegen drift, typecheck, test-api).
 -   [ ] New and existing unit tests pass locally with my changes.
 -   [ ] Any dependent changes have been merged and published in downstream modules.
 -   [ ] The code introduces no new "code smells" or SOLID violations
