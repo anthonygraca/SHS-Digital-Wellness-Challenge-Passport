@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth.deps import current_claims
+from app.auth.eligibility import is_current_student
 from app.auth.provider import AuthError, AuthProvider
 from app.auth.registry import get_auth_provider
 from app.auth.session import mint_session_token
@@ -92,7 +93,7 @@ def session(request: Request):
     return SessionOut(
         subject=claims["sub"],
         affiliation=affiliation,
-        isCurrentStudent="student" in affiliation.lower(),
+        isCurrentStudent=is_current_student(affiliation),
     )
 
 
