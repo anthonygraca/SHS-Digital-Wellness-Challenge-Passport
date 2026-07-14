@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Tuple
-
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -19,7 +17,7 @@ def get_student(db: Session, campus_id: str, sso_subject: str):
 
 def get_or_create_student(
     db: Session, campus_id: str, sso_subject: str, affiliation: str
-) -> Tuple[Student, bool]:
+) -> tuple[Student, bool]:
     """Load the student for (campus_id, sso_subject), or create one.
 
     Returns (student, created). Uniqueness is enforced by the DB constraint, so a

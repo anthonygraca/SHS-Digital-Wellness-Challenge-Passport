@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -85,7 +85,9 @@ def session(request: Request):
     """Return the current session for the SPA, or 401 if not signed in."""
     claims = current_claims(request)
     if claims is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not signed in")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not signed in"
+        )
     affiliation = claims.get("affiliation", "")
     return SessionOut(
         subject=claims["sub"],
@@ -130,18 +132,34 @@ _MOCK_IDP_PAGE = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Mock Campus IdP</title>
   <style>
-    body { font-family: system-ui, sans-serif; background: #10141c; color: #e8eaed;
-           display: grid; place-items: center; min-height: 100vh; margin: 0; }
-    form { background: #1b2230; padding: 28px; border-radius: 16px; width: 320px;
-           box-shadow: 0 8px 30px rgba(0,0,0,.4); }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #10141c; color: #e8eaed;
+      display: grid; place-items: center;
+      min-height: 100vh; margin: 0;
+    }
+    form {
+      background: #1b2230; padding: 28px;
+      border-radius: 16px; width: 320px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+    }
     h1 { font-size: 18px; margin: 0 0 4px; }
     p.sub { margin: 0 0 20px; color: #9aa0a6; font-size: 13px; }
     label { display: block; font-size: 13px; margin: 14px 0 6px; }
-    input[type=text] { width: 100%; box-sizing: border-box; padding: 10px;
-           border-radius: 8px; border: 1px solid #3c4043; background: #10141c; color: #fff; }
-    .row { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 13px; }
-    button { width: 100%; margin-top: 20px; padding: 12px; border: none; border-radius: 24px;
-             background: #b3261e; color: #fff; font-weight: 600; font-size: 14px; cursor: pointer; }
+    input[type="text"] {
+      width: 100%; box-sizing: border-box; padding: 10px;
+      border-radius: 8px; border: 1px solid #3c4043;
+      background: #10141c; color: #fff;
+    }
+    .row {
+      display: flex; align-items: center;
+      gap: 8px; margin-top: 16px; font-size: 13px;
+    }
+    button {
+      width: 100%; margin-top: 20px; padding: 12px;
+      border: none; border-radius: 24px; background: #b3261e;
+      color: #fff; font-weight: 600; font-size: 14px; cursor: pointer;
+    }
   </style>
 </head>
 <body>

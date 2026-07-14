@@ -40,7 +40,13 @@ class SamlProvider:
         from onelogin.saml2.auth import OneLogin_Saml2_Auth  # lazy: native dep
 
         auth = OneLogin_Saml2_Auth(
-            {"https": "on", "http_host": "", "script_name": "", "get_data": {}, "post_data": {}},
+            {
+                "https": "on",
+                "http_host": "",
+                "script_name": "",
+                "get_data": {},
+                "post_data": {},
+            },
             old_settings=self._settings,
         )
         return auth.login(return_to=return_to)
@@ -63,7 +69,9 @@ class SamlProvider:
             raise AuthError("SAML assertion missing subject")
         affiliation = _first(attrs, _AFFILIATION_ATTRS) or "student"
         issuer = self._settings.get("idp", {}).get("entityId", "")
-        return AssertionResult(sso_subject=subject, affiliation=affiliation, issuer=issuer)
+        return AssertionResult(
+            sso_subject=subject, affiliation=affiliation, issuer=issuer
+        )
 
 
 def _first(attrs: dict, keys):

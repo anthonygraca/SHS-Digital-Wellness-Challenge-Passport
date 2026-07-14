@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 import jwt
 
@@ -27,7 +26,7 @@ def mint_session_token(
     return jwt.encode(payload, settings.jwt_secret, algorithm=_ALG)
 
 
-def verify_session_token(token: str) -> Optional[dict]:
+def verify_session_token(token: str) -> dict | None:
     """Return the decoded claims, or None if missing/expired/tampered."""
     if not token:
         return None

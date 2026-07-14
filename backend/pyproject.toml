@@ -20,8 +20,22 @@ dependencies = [
 # Real SAML integration. Pulls native xmlsec/libxmlsec1 — installed ONLY when the
 # real campus IdP is wired (AUTH_PROVIDER=saml). The mock path never needs this.
 saml = ["python3-saml>=1.16"]
-dev = ["pytest>=8.0", "httpx>=0.27"]
+dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.6"]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 90
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, I import-sorting, B bugbear, UP pyupgrade.
+select = ["E", "W", "F", "I", "B", "UP"]
+# B008: Depends()/Query() in argument defaults is the intended FastAPI idiom.
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Package markers re-export nothing; empty is fine.
+"__init__.py" = ["F401"]

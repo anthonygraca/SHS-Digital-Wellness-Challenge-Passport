@@ -20,4 +20,6 @@ def get_auth_provider() -> AuthProvider:
         from app.auth.saml_provider import SamlProvider
 
         return SamlProvider(settings={})
-    raise ValueError(f"Unknown WP_AUTH_PROVIDER: {provider!r} (expected 'mock' or 'saml')")
+    raise ValueError(
+        f"Unknown WP_AUTH_PROVIDER: {provider!r} (expected 'mock' or 'saml')"
+    )

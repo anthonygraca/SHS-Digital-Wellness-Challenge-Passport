@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Dict
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -22,9 +21,9 @@ class Settings(BaseSettings):
     jwt_ttl_seconds: int = 3600
     session_cookie: str = "wp_session"
 
-    # SAML issuer -> campus_id. An unknown issuer is a failed auth, never a silent default.
-    # Override via WP_CAMPUS_ISSUER_MAP as a JSON object string (pydantic-settings decodes it).
-    campus_issuer_map: Dict[str, str] = {
+    # SAML issuer -> campus_id. An unknown issuer is a failed auth, not a default.
+    # Override via WP_CAMPUS_ISSUER_MAP as JSON (pydantic-settings decodes it).
+    campus_issuer_map: dict[str, str] = {
         "mock-idp": "csub",
         "https://idp.csub.edu/idp/shibboleth": "csub",
     }

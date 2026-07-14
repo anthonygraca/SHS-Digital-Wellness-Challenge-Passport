@@ -20,6 +20,7 @@ def _acs(client, **fields):
 
 # --- US-1 Gherkin scenario 1: first-time student authenticates -----------------
 
+
 def test_first_time_creates_minimal_record(client, db_sessionmaker):
     resp = _acs(client, subject="abc@csub.edu", affiliation="student")
 
@@ -45,6 +46,7 @@ def test_student_table_stores_only_opaque_identity(db_sessionmaker):
 
 # --- US-1 Gherkin scenario 2: returning student is loaded, not duplicated -------
 
+
 def test_returning_student_not_duplicated(client, db_sessionmaker):
     first = _acs(client, subject="abc@csub.edu", affiliation="student")
     second = _acs(client, subject="abc@csub.edu", affiliation="student")
@@ -55,6 +57,7 @@ def test_returning_student_not_duplicated(client, db_sessionmaker):
 
 
 # --- US-1 Gherkin scenario 3: failed authentication creates no record -----------
+
 
 def test_failed_assertion_creates_no_record(client, db_sessionmaker):
     resp = _acs(client, subject="abc@csub.edu", fail="1")
@@ -74,6 +77,7 @@ def test_missing_subject_creates_no_record(client, db_sessionmaker):
 
 
 # --- get_or_create unit + session endpoint --------------------------------------
+
 
 def test_get_or_create_is_idempotent(db_sessionmaker):
     with db_sessionmaker() as db:
