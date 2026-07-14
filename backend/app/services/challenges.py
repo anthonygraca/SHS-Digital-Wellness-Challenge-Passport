@@ -5,10 +5,13 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.challenge import Challenge, Task
+from app.models.challenge import AssessmentItem, Challenge, Task
 from app.schemas.challenge import (
+    AssessmentItemUpdate,
     ChallengeCreate,
     ChallengeUpdate,
+    MCQCreate,
+    ReflectionCreate,
     TaskCreate,
     TaskReorder,
     TaskUpdate,
@@ -215,3 +218,63 @@ def reorder_tasks(db: Session, challenge: Challenge, data: TaskReorder) -> list[
         .all()
     )
     return list(updated)
+
+
+# ---------------------------------------------------------------------------
+# Assessment item CRUD (FR-B3)
+# ---------------------------------------------------------------------------
+
+
+def add_assessment_item(
+    db: Session, task: Task, data: MCQCreate | ReflectionCreate
+) -> AssessmentItem:
+    """Attach an MCQ or reflection item to a task, tagged to a learning outcome."""
+    item = AssessmentItem(
+        task_id=task.id,
+        item_type=data.item_type,
+        prompt=data.prompt,
+        outcome_tag=data.outcome_tag,
+        options=data.options if data.item_type == "mcq" else None,
+        answer_key=data.answer_key if data.item_type == "mcq" else None,
+        rubric=data.rubric if data.item_type == "reflection" else None,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def list_assessment_items(db: Session, task_id: int) -> list[AssessmentItem]:
+    rows = (
+        db.execute(
+            select(AssessmentItem).where(AssessmentItem.task_id == task_id)
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
+def get_assessment_item(
+    db: Session, task_id: int, item_id: int
+) -> AssessmentItem | None:
+    return db.execute(
+        select(AssessmentItem).where(
+            AssessmentItem.id == item_id, AssessmentItem.task_id == task_id
+        )
+    ).scalar_one_or_none()
+
+
+def update_assessment_item(
+    db: Session, item: AssessmentItem, data: AssessmentItemUpdate
+) -> AssessmentItem:
+    for field, value in data.model_dump(exclude_none=True).items():
+        setattr(item, field, value)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def delete_assessment_item(db: Session, item: AssessmentItem) -> None:
+    db.delete(item)
+    db.commit()

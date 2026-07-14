@@ -17,6 +17,7 @@ from sqlalchemy.pool import StaticPool
 from app.db import Base, get_db
 from app.main import app
 from app.models.challenge import (  # noqa: F401  (register on Base.metadata)
+    AssessmentItem,
     Challenge,
     Task,
 )

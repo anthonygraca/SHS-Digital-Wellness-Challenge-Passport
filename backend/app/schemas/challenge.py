@@ -1,8 +1,81 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# ---------------------------------------------------------------------------
+# Assessment item schemas (FR-B3)
+# Defined first so TaskOut can reference AssessmentItemOut without a forward ref.
+# ---------------------------------------------------------------------------
+
+
+class MCQCreate(BaseModel):
+    """Payload for attaching a multiple-choice question."""
+
+    item_type: Literal["mcq"]
+    prompt: str
+    outcome_tag: str
+    options: list[str] = Field(..., min_length=2)
+    answer_key: str
+
+    @model_validator(mode="after")
+    def answer_key_in_options(self) -> MCQCreate:
+        if self.answer_key not in self.options:
+            raise ValueError("answer_key must be one of the provided options")
+        return self
+
+
+class ReflectionCreate(BaseModel):
+    """Payload for attaching a reflection item."""
+
+    item_type: Literal["reflection"]
+    prompt: str
+    outcome_tag: str
+    rubric: str
+
+
+# Discriminated union — ``item_type`` selects the concrete model.
+AssessmentItemCreate = Annotated[
+    Union[MCQCreate, ReflectionCreate],
+    Field(discriminator="item_type"),
+]
+
+
+class AssessmentItemUpdate(BaseModel):
+    """Partial update — all fields optional; validation mirrors create rules."""
+
+    prompt: str | None = None
+    outcome_tag: str | None = None
+    # MCQ
+    options: list[str] | None = None
+    answer_key: str | None = None
+    # Reflection
+    rubric: str | None = None
+
+    @model_validator(mode="after")
+    def answer_key_in_options_if_both_provided(self) -> AssessmentItemUpdate:
+        if self.answer_key is not None and self.options is not None:
+            if self.answer_key not in self.options:
+                raise ValueError("answer_key must be one of the provided options")
+        return self
+
+
+class AssessmentItemOut(BaseModel):
+    id: int
+    task_id: int
+    item_type: str
+    prompt: str
+    outcome_tag: str
+    options: list[str] | None
+    answer_key: str | None
+    rubric: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
 
 # ---------------------------------------------------------------------------
 # Task schemas
@@ -55,6 +128,8 @@ class TaskOut(BaseModel):
     required: bool
     created_at: datetime
     updated_at: datetime
+    # Populated lazily — empty list when no items have been attached.
+    assessment_items: list[AssessmentItemOut] = []
 
     model_config = {"from_attributes": True}
 
