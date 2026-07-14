@@ -30,3 +30,33 @@ export function LockIcon({ size = 16 }: { size?: number }) {
     </svg>
   );
 }
+
+export function CheckCircleIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.2 14.2-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4-7 7z" />
+    </svg>
+  );
+}
+
+export function BoltIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M11 21h-1l1-7H6.5a.5.5 0 0 1-.4-.8l7-11h1l-1 7h4.5a.5.5 0 0 1 .4.8l-7 11z" />
+    </svg>
+  );
+}

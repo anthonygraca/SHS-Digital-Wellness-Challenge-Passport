@@ -24,7 +24,14 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      "/auth": "http://localhost:8000",
+      // Proxy the backend auth endpoints, but NOT /auth/callback — that is a
+      // client-side SPA route. Without this bypass the proxy would forward the
+      // post-login redirect to FastAPI, which 404s, and sign-in never completes.
+      "/auth": {
+        target: "http://localhost:8000",
+        bypass: (req) =>
+          req.url?.startsWith("/auth/callback") ? "/index.html" : undefined,
+      },
       "/mock-idp": "http://localhost:8000",
       "/api": "http://localhost:8000",
     },
