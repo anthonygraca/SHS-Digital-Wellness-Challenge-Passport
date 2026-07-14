@@ -91,11 +91,13 @@ def session(request: Request):
         )
     affiliation = claims.get("affiliation", "")
     role = claims.get("role", "student")
+    student_id = claims.get("student_id")
     return SessionOut(
         subject=claims["sub"],
         affiliation=affiliation,
         isCurrentStudent="student" in affiliation.lower(),
         role=role,
+        student_id=student_id,
     )
 
 

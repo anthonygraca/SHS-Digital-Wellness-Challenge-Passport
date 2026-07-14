@@ -10,3 +10,4 @@ class SessionOut(BaseModel):
     affiliation: str
     isCurrentStudent: bool
     role: str
+    student_id: int  # Database ID for check-ins and enrollments
