@@ -1,5 +1,6 @@
 # SHS Digital Wellness Challenge Passport
 
+
 Mobile-first AI passport for multi-week student wellness challenges (CSUB Student Health Services,
 DxHub 2026). Students sign in with campus SSO, join a themed challenge, check in at events via QR,
 and track progress; staff author challenges and pull reports.
