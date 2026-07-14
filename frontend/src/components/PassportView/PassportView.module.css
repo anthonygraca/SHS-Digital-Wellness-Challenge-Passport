@@ -1,0 +1,141 @@
+.loading,
+.error {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: linear-gradient(160deg, var(--wp-hero-a), var(--wp-hero-b));
+}
+
+.errorCard {
+  background: var(--wp-surface);
+  border-radius: 24px;
+  padding: 32px 28px;
+  text-align: center;
+  max-width: 360px;
+  width: 100%;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+
+.errorHeading {
+  font-family: var(--wp-font-display);
+  color: var(--wp-on-surface);
+  margin: 0 0 12px;
+  font-size: 24px;
+}
+
+.errorMessage {
+  color: var(--wp-on-surface-variant);
+  margin: 0 0 24px;
+}
+
+.container {
+  min-height: 100dvh;
+  background: linear-gradient(160deg, var(--wp-hero-a), var(--wp-hero-b));
+  padding: 20px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+}
+
+.headerContent {
+  flex: 1;
+  min-width: 280px;
+}
+
+.challengeName {
+  font-family: var(--wp-font-display);
+  color: var(--wp-on-surface);
+  margin: 0 0 8px;
+  font-size: clamp(24px, 5vw, 36px);
+}
+
+.themeName {
+  color: var(--wp-on-surface-variant);
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-style: italic;
+}
+
+.signoutButton {
+  min-height: 44px;
+  padding: 0 24px;
+  border: 1px solid var(--wp-outline);
+  border-radius: 24px;
+  background: var(--wp-surface);
+  color: var(--wp-primary);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.signoutButton:hover {
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+  border-color: var(--wp-primary);
+}
+
+.signoutButton:focus-visible {
+  outline: 3px solid var(--wp-primary);
+  outline-offset: 2px;
+}
+
+.weeksSection {
+  margin-bottom: 32px;
+}
+
+.weeksGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.prizeNotice {
+  background: var(--wp-surface);
+  border-radius: 16px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 600px;
+  margin: 0 auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.prizeIcon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.prizeText {
+  color: var(--wp-on-surface);
+  font-weight: 600;
+  font-size: 16px;
+}
+
+@media (max-width: 640px) {
+  .container {
+    padding: 16px;
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .signoutButton {
+    width: 100%;
+  }
+
+  .weeksGrid {
+    grid-template-columns: 1fr;
+  }
+}

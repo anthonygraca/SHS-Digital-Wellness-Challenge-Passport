@@ -1,0 +1,54 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.progressBar {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--wp-primary), var(--wp-tertiary));
+  border-radius: 4px;
+  transition: width 0.5s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.text {
+  font-size: 16px;
+  color: var(--wp-on-surface);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.completed {
+  color: var(--wp-tertiary);
+  font-weight: 700;
+}
+
+.total {
+  color: var(--wp-on-surface);
+  font-weight: 700;
+}
+
+.remaining {
+  color: var(--wp-primary);
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .text {
+    font-size: 14px;
+  }
+
+  .progressBar {
+    height: 6px;
+  }
+}
