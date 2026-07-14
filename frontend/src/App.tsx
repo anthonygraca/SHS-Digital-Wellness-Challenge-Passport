@@ -1,11 +1,12 @@
 import React from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { SessionProvider, useSession } from "./auth/SessionProvider";
+import { isAdminSession } from "./auth/roles";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { SignIn } from "./components/SignIn/SignIn";
 import { Landing } from "./components/Landing/Landing";
-import { AuthCallback } from "./components/AuthCallback/AuthCallback";
 import { Passport } from "./components/Passport/Passport";
+import { AuthCallback } from "./components/AuthCallback/AuthCallback";
 import { ChallengeBuilder } from "./components/admin/ChallengeBuilder/ChallengeBuilder";
 
 /** Sign-in route: if already authenticated, skip straight to the passport. */
@@ -21,10 +22,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useSession();
   if (loading) return null;
   if (!session) return <Navigate to="/" replace />;
-  const aff = session.affiliation.toLowerCase();
-  if (!aff.includes("admin") && !aff.includes("staff")) {
-    return <Navigate to="/home" replace />;
-  }
+  if (!isAdminSession(session)) return <Navigate to="/home" replace />;
   return <>{children}</>;
 }
 

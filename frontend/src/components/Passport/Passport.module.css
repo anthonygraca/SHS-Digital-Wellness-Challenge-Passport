@@ -1,37 +1,348 @@
+.screen {
+  min-height: 100dvh;
+  padding: 24px 16px 96px;
+  background: linear-gradient(160deg, var(--wp-hero-a), var(--wp-hero-b));
+  color: var(--wp-on-surface);
+}
+
 .center {
   min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 24px;
+  text-align: center;
   background: linear-gradient(160deg, var(--wp-hero-a), var(--wp-hero-b));
+  color: var(--wp-on-surface);
 }
 
-.card {
+/* --- Progress header --- */
+
+.header {
+  max-width: 720px;
+  margin: 0 auto 20px;
   background: var(--wp-surface);
   border-radius: 24px;
-  padding: 32px 28px;
-  text-align: center;
-  max-width: 360px;
-  width: 100%;
+  padding: 24px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
 }
 
-.heading {
-  font-family: var(--wp-font-display);
-  color: var(--wp-on-surface);
-  margin: 0 0 12px;
+.eyebrow {
+  margin: 0 0 4px;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--wp-on-surface-variant);
 }
 
-.body {
+.countdown {
+  font-family: var(--wp-font-display);
+  font-size: clamp(20px, 5vw, 28px);
+  margin: 0 0 16px;
+  color: var(--wp-on-surface);
+}
+
+.progressTrack {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--wp-surface-container-high);
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--wp-primary);
+  transition: width 0.3s ease;
+}
+
+/* --- Week tiles --- */
+
+.grid {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 560px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.gridItem {
+  display: flex;
+}
+
+.tile {
+  display: block;
+  width: 100%;
+  height: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: var(--wp-surface-container);
+  border: 1px solid var(--wp-outline-variant);
+  border-radius: 20px;
+  padding: 18px;
+}
+
+.tile:focus-visible {
+  outline: 3px solid var(--wp-primary);
+  outline-offset: 2px;
+}
+
+.available {
+  border-color: var(--wp-primary);
+  box-shadow: 0 0 0 1px var(--wp-primary);
+}
+
+.complete {
+  border-color: var(--wp-tertiary);
+  background: color-mix(in srgb, var(--wp-tertiary) 12%, var(--wp-surface-container));
+}
+
+.locked {
+  opacity: 0.6;
+}
+
+.tileTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.weekNo {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--wp-on-surface-variant);
-  margin: 0 0 24px;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--wp-surface-container-high);
+  color: var(--wp-on-surface-variant);
+}
+
+.available .status {
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+}
+
+.complete .status {
+  background: var(--wp-tertiary);
+  color: var(--wp-surface);
+}
+
+.title {
+  display: block;
+  font-family: var(--wp-font-display);
+  font-size: 19px;
+  margin: 0 0 2px;
+  color: var(--wp-on-surface);
+}
+
+.activity {
+  display: block;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wp-primary);
+}
+
+.caption {
+  display: block;
+  margin: 0;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.4;
+  color: var(--wp-on-surface-variant);
+}
+
+/* --- Detail sheet (mobile bottom sheet) --- */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+@media (min-width: 560px) {
+  .backdrop {
+    align-items: center;
+    padding: 24px;
+  }
+}
+
+.sheet {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  max-height: 88dvh;
+  overflow-y: auto;
+  background: var(--wp-surface);
+  color: var(--wp-on-surface);
+  border-radius: 28px 28px 0 0;
+  padding: 20px 20px 28px;
+  box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.4);
+  animation: sheet-up 0.24s ease;
+}
+
+@media (min-width: 560px) {
+  .sheet {
+    border-radius: 28px;
+    animation: none;
+  }
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(16px);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.sheetHandle {
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--wp-outline-variant);
+  margin: 0 auto 16px;
+}
+
+.close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 999px;
+  background: var(--wp-surface-container-high);
+  color: var(--wp-on-surface-variant);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.close:focus-visible {
+  outline: 3px solid var(--wp-primary);
+  outline-offset: 2px;
+}
+
+.sheetTitle {
+  font-family: var(--wp-font-display);
+  font-size: 24px;
+  margin: 0 0 2px;
+  color: var(--wp-on-surface);
+}
+
+.sheetCaption {
+  margin: 0 0 18px;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--wp-on-surface-variant);
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  margin: 0 0 22px;
+}
+
+.meta div {
+  min-width: 0;
+}
+
+.meta dt {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--wp-on-surface-variant);
+}
+
+.meta dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: var(--wp-on-surface);
+}
+
+.checkIn,
+.checkedIn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 24px;
+  border: none;
+  border-radius: 26px;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.checkIn {
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+}
+
+.checkIn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.checkIn:focus-visible {
+  outline: 3px solid var(--wp-on-primary);
+  outline-offset: -6px;
+}
+
+.checkedIn {
+  background: var(--wp-tertiary);
+  color: var(--wp-surface);
+  cursor: default;
+}
+
+/* --- Sign out --- */
+
+.signoutBar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  background: color-mix(in srgb, var(--wp-surface) 88%, transparent);
+  backdrop-filter: blur(6px);
 }
 
 .signout {
   min-height: 48px;
-  padding: 0 24px;
+  padding: 0 28px;
   border: 1px solid var(--wp-outline);
   border-radius: 24px;
   background: transparent;

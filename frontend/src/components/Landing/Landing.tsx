@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useSession } from "../../auth/SessionProvider";
+import { isAdminSession } from "../../auth/roles";
 import { ApiError } from "../../api/challenges";
 import { enroll, fetchEnrollmentStatus } from "../../api/enrollment";
 import type { EnrollmentStatus } from "../../types/enrollment";
@@ -10,6 +11,11 @@ import styles from "./Landing.module.css";
 
 /**
  * Minimal authenticated landing for US-1: confirms the session is live.
+ *
+ * This is the *student* landing. Staff/admins are redirected to the Challenge
+ * Builder before any of it runs: the US-2 gate below is about eligibility to
+ * *participate in a challenge*, not to use the app, so sending staff into it
+ * would block them behind "not eligible to join" — the builder is their home.
  *
  * US-2 (FR-A3): current-student eligibility gate. A non-current student is blocked
  * with a friendly message; a current student may proceed to join the challenge.
@@ -74,6 +80,9 @@ export function Landing() {
 
   if (loading) return <div className={styles.center}>Loading…</div>;
   if (!session) return <Navigate to="/" replace />;
+  // Before the student gate: staff are not ineligible participants, they are a
+  // different persona. AdminRoute guards the destination.
+  if (isAdminSession(session)) return <Navigate to="/admin" replace />;
   if (!session.isCurrentStudent) return <EligibilityBlocked />;
   if (statusLoading) return <div className={styles.center}>Loading…</div>;
 
@@ -111,10 +120,6 @@ export function Landing() {
   if (!status?.active_challenge) return <NoActiveChallenge />;
   if (status.enrolled) return <Navigate to="/passport" replace />;
 
-  const isAdmin =
-    session.affiliation.toLowerCase().includes("admin") ||
-    session.affiliation.toLowerCase().includes("staff");
-
   return (
     <main className={styles.center}>
       <div className={styles.card}>
@@ -123,11 +128,6 @@ export function Landing() {
           Signed in as <strong>{session.affiliation}</strong>
         </p>
         <p className={styles.subject}>{session.subject}</p>
-        {isAdmin && (
-          <a href="/admin" className={styles.adminLink}>
-            Challenge Builder →
-          </a>
-        )}
         <button
           type="button"
           className={styles.join}

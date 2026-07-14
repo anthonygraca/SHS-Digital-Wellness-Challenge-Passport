@@ -154,3 +154,48 @@ describe("Landing challenge enrollment (US-3 / FR-C1)", () => {
     expect(screen.queryByRole("heading", { name: /no active challenge/i })).toBeNull();
   });
 });
+
+describe("Landing staff routing (US-11)", () => {
+  // Staff have affiliation "staff", so isCurrentStudent is false. Before this
+  // routing existed they hit the student eligibility gate and were shown
+  // "not eligible to join", leaving the Challenge Builder reachable only by
+  // typing /admin.
+  it.each([
+    ["staff", "staff@csub.edu"],
+    ["admin", "admin@csub.edu"],
+  ])("sends a %s session to the Challenge Builder", (affiliation, subject) => {
+    state.session = asSession({ affiliation, subject, isCurrentStudent: false });
+
+    render(<Landing />);
+
+    expect(screen.getByText("redirect:/admin")).toBeInTheDocument();
+    expect(screen.queryByText(/not eligible to join/i)).toBeNull();
+  });
+
+  it("does not ask the enrollment API about a staff session", () => {
+    state.session = asSession({ affiliation: "staff", isCurrentStudent: false });
+
+    render(<Landing />);
+
+    // Staff are redirected before the student enroll flow runs; /enrollment is
+    // gated on current-student and would 403 anyway.
+    expect(api.fetchEnrollmentStatus).not.toHaveBeenCalled();
+  });
+
+  it("keeps a plain student on the student flow", async () => {
+    state.session = asSession({ affiliation: "student" });
+    api.fetchEnrollmentStatus.mockResolvedValue({
+      active_challenge: { id: 1, name: "Stranger Things Wellness Challenge" },
+      enrolled: false,
+    } as EnrollmentStatus);
+
+    render(<Landing />);
+
+    // Guards against the redirect loop: AdminRoute bounces non-admins /admin ->
+    // /home, so a student must never be bounced /home -> /admin.
+    expect(screen.queryByText("redirect:/admin")).toBeNull();
+    expect(
+      await screen.findByRole("button", { name: /join the/i }),
+    ).toBeInTheDocument();
+  });
+});
