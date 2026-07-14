@@ -31,7 +31,7 @@ const asSession = (over: Partial<Session>): Session => ({
   ...over,
 });
 
-function week(weekNo: number, status: WeekStatus) {
+function week(weekNo: number, status: WeekStatus, required = true) {
   return {
     weekNo,
     title: `Week ${weekNo} Portal`,
@@ -41,12 +41,12 @@ function week(weekNo: number, status: WeekStatus) {
     dateStart: "2026-09-02",
     dateEnd: "2026-09-06",
     prize: "Wellness kit",
-    required: true,
+    required,
     status,
   };
 }
 
-/** A 7-week passport with the first `completed` weeks done (sequential unlock). */
+/** A 7-week passport (all required) with the first `completed` weeks done. */
 function passportWith(completed: number): PassportData {
   const weeks = Array.from({ length: 7 }, (_, i) => {
     const n = i + 1;
@@ -60,6 +60,9 @@ function passportWith(completed: number): PassportData {
     totalWeeks: 7,
     completedWeeks: completed,
     remainingWeeks: 7 - completed,
+    requiredTotal: 7,
+    requiredCompleted: completed,
+    prizeEligible: completed === 7,
     weeks,
   };
 }
@@ -99,6 +102,51 @@ describe("PassportView (US-5 / FR-C2, FR-C3)", () => {
     const bar = screen.getByRole("progressbar", { name: /weeks complete/i });
     expect(bar).toHaveAttribute("aria-valuenow", "3");
     expect(bar).toHaveAttribute("aria-valuemax", "7");
+  });
+});
+
+describe("PassportView prize-eligibility indicator (US-7 / FR-C5)", () => {
+  it("shows 'not yet eligible' while required tasks remain", () => {
+    render(<PassportView passport={passportWith(2)} />);
+    expect(screen.getByText("Not yet eligible")).toBeInTheDocument();
+    expect(screen.getByText(/2 of 7 required tasks complete/i)).toBeInTheDocument();
+    expect(screen.queryByText("Prize eligible")).toBeNull();
+  });
+
+  it("shows 'eligible' once all required tasks are complete", () => {
+    render(<PassportView passport={passportWith(7)} />);
+    expect(screen.getByText("Prize eligible")).toBeInTheDocument();
+    expect(screen.queryByText("Not yet eligible")).toBeNull();
+  });
+
+  it("stays eligible even when an optional task is incomplete", () => {
+    // 3 required tasks (all complete) + 1 optional task left incomplete.
+    const passport: PassportData = {
+      challengeName: "Stranger Things Wellness Challenge",
+      theme: "stranger-things",
+      totalWeeks: 4,
+      completedWeeks: 3,
+      remainingWeeks: 1,
+      requiredTotal: 3,
+      requiredCompleted: 3,
+      prizeEligible: true,
+      weeks: [
+        week(1, "complete", true),
+        week(2, "complete", true),
+        week(3, "complete", true),
+        week(4, "available", false), // optional, not done
+      ],
+    };
+    render(<PassportView passport={passport} />);
+    expect(screen.getByText("Prize eligible")).toBeInTheDocument();
+    expect(screen.queryByText("Not yet eligible")).toBeNull();
+  });
+
+  it("exposes the indicator as a status region for assistive tech", () => {
+    render(<PassportView passport={passportWith(2)} />);
+    expect(
+      screen.getByRole("status", { name: /prize eligibility: not yet eligible/i }),
+    ).toBeInTheDocument();
   });
 });
 

@@ -18,6 +18,9 @@ def _to_passport_out(view: PassportView) -> PassportOut:
         totalWeeks=view.total_weeks,
         completedWeeks=view.completed_weeks,
         remainingWeeks=view.remaining_weeks,
+        requiredTotal=view.required_total,
+        requiredCompleted=view.required_completed,
+        prizeEligible=view.prize_eligible,
         weeks=[
             WeekOut(
                 weekNo=w.week_no,
@@ -44,7 +47,8 @@ def get_passport(
 
     Identity comes from the session cookie (US-1); 401 if not signed in, 403 if the
     caller is not a current student (US-2 / FR-A3). 404 if the student's campus has
-    no published challenge. Serves US-5 (FR-C2, FR-C3).
+    no published challenge. Serves US-5 (FR-C2, FR-C3) and the prize-eligibility
+    indicator US-7 (FR-C5).
     """
     view = build_passport(
         db, campus_id=claims["campus_id"], student_id=claims["student_id"]

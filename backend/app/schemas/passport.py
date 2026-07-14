@@ -29,6 +29,8 @@ class PassportOut(BaseModel):
     """The student's passport: challenge meta, derived counts, and week tiles.
 
     The SPA composes the "X of N complete, N remaining" countdown from the counts.
+    ``prizeEligible`` is a derived query over required-task completion (US-7 /
+    FR-C5), with the required counts supplied so the UI can show progress toward it.
     """
 
     challengeName: str
@@ -36,6 +38,9 @@ class PassportOut(BaseModel):
     totalWeeks: int
     completedWeeks: int
     remainingWeeks: int
+    requiredTotal: int
+    requiredCompleted: int
+    prizeEligible: bool
     weeks: list[WeekOut]
 
 
