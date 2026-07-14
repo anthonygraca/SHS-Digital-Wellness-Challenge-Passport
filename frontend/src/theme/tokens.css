@@ -1,0 +1,84 @@
+/*
+ * Material 3 color-role tokens for the Wellness Passport, prefixed --wp-*.
+ * Token NAMES mirror the design-component prototype (docs/SHS Wellness Passport
+ * (standalone).html); values are authored here because the prototype ships them
+ * as gzipped runtime token-sets rather than plain CSS.
+ *
+ * Semester re-skin = add one [data-theme="..."] block below + one themes.ts entry.
+ * Components must reference only var(--wp-*), never hard-coded colors.
+ */
+
+:root {
+  /* Neutral M3 baseline so the app renders before a theme is applied. */
+  --wp-primary: #6750a4;
+  --wp-on-primary: #ffffff;
+  --wp-primary-container: #eaddff;
+  --wp-on-primary-container: #21005d;
+  --wp-secondary: #625b71;
+  --wp-on-secondary: #ffffff;
+  --wp-tertiary: #7d5260;
+  --wp-surface: #fef7ff;
+  --wp-surface-container: #f3edf7;
+  --wp-surface-container-high: #ece6f0;
+  --wp-on-surface: #1d1b20;
+  --wp-on-surface-variant: #49454f;
+  --wp-outline: #79747e;
+  --wp-outline-variant: #cac4d0;
+  --wp-error: #b3261e;
+  --wp-on-error: #ffffff;
+  --wp-error-container: #f9dedc;
+  --wp-on-error-container: #410e0b;
+  --wp-hero-a: #6750a4;
+  --wp-hero-b: #21005d;
+  --wp-font-display: "Oswald", system-ui, sans-serif;
+}
+
+/* Stranger Things — dark, crimson, retro-80s. */
+[data-theme="stranger-things"] {
+  --wp-primary: #ff4438;
+  --wp-on-primary: #ffffff;
+  --wp-primary-container: #7f1710;
+  --wp-on-primary-container: #ffdad4;
+  --wp-secondary: #e7bdb6;
+  --wp-on-secondary: #442925;
+  --wp-tertiary: #e5c38d;
+  --wp-surface: #12100f;
+  --wp-surface-container: #201a19;
+  --wp-surface-container-high: #2b2321;
+  --wp-on-surface: #f1dedb;
+  --wp-on-surface-variant: #d8c2be;
+  --wp-outline: #a08c88;
+  --wp-outline-variant: #534340;
+  --wp-error: #ffb4ab;
+  --wp-on-error: #690005;
+  --wp-error-container: #93000a;
+  --wp-on-error-container: #ffdad6;
+  --wp-hero-a: #4a0f0a;
+  --wp-hero-b: #12100f;
+  --wp-font-display: "Oswald", system-ui, sans-serif;
+}
+
+/* Harry Potter (Marauder's Map) — parchment / burgundy / gold, lighter. */
+[data-theme="harry-potter"] {
+  --wp-primary: #7d2e2e;
+  --wp-on-primary: #ffffff;
+  --wp-primary-container: #ffdad5;
+  --wp-on-primary-container: #410004;
+  --wp-secondary: #b8860b;
+  --wp-on-secondary: #ffffff;
+  --wp-tertiary: #4b5320;
+  --wp-surface: #f5ecd8;
+  --wp-surface-container: #eee2c9;
+  --wp-surface-container-high: #e7d9ba;
+  --wp-on-surface: #23190b;
+  --wp-on-surface-variant: #4f4536;
+  --wp-outline: #817567;
+  --wp-outline-variant: #d3c4ad;
+  --wp-error: #b3261e;
+  --wp-on-error: #ffffff;
+  --wp-error-container: #f9dedc;
+  --wp-on-error-container: #410e0b;
+  --wp-hero-a: #7d2e2e;
+  --wp-hero-b: #b8860b;
+  --wp-font-display: "Cinzel", Georgia, serif;
+}
