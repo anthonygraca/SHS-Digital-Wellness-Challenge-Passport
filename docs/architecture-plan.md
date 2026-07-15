@@ -124,7 +124,8 @@ back to Python if the camp team has no C# capability at all.
 
 ```
 Challenge(id, campus_id, name, theme_id, semester, starts_on, ends_on, status)
-Theme(id, name, palette_json, logo_key, hero_key, copy_tone)          -- R6 skinning
+Theme(id, name, palette_json, logo_url, hero_url,                     -- R6 skinning
+      app_title, tagline, copy_tone)
 Task(id, challenge_id, week_no, title, caption, activity_type,        -- R5 the "weeks"
      location, date_start, date_end, prize, is_required, order)
 QuizItem(id, task_id, kind[mcq|reflection], prompt, options_json,     -- R8 assessment
@@ -147,6 +148,15 @@ Erika's "two students, same name" concern).
 
 **Prize eligibility is a query, not a flag** — derived from completion of required tasks, so it's
 always correct and auditable.
+
+**Theme is data, not code (R6 / NFR-6).** `Theme.id` is a slug that doubles as the SPA's
+`data-theme` value, so a theme's static token block still skins the app if its row is missing.
+`palette_json` maps a CSS custom-property suffix to its value (`{"primary": "#ff4438"}`), which the
+SPA applies as `--wp-*` over that block. The asset fields are `*_url` rather than the object-store
+`*_key` originally sketched — there is no asset store yet, so admins supply URLs; swapping to keys
+is a later change behind the same API. Copy is split into `app_title` / `tagline` (the strings the
+app renders) and `copy_tone` (the descriptor authors write to). The student's passport response
+embeds the *resolved* theme, so a re-skin ships no code.
 
 ---
 
