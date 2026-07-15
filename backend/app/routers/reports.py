@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
@@ -49,6 +50,24 @@ def _active_challenge_or_404(db: Session, claims: dict) -> Challenge:
             },
         )
     return challenge
+
+
+def _utc_iso(ts: datetime) -> str:
+    """One timestamp shape in the file, whatever the database gave back.
+
+    Check-ins are always written in UTC, but SQLite doesn't keep the offset that
+    DateTime(timezone=True) carries, so the same row reads back naive on sqlite
+    and UTC-aware on postgres — and would otherwise export two different strings.
+    Re-attach the offset the writer guaranteed and print one of them. Seconds
+    resolution: this column says which day someone qualified, not which
+    microsecond, and the file's own order already carries the tie-break.
+    """
+    aware = ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+    return (
+        aware.astimezone(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def _prize_csv_filename(challenge: Challenge) -> str:
@@ -119,7 +138,7 @@ def prize_eligible_csv(
                 row.sso_subject,
                 row.required_completed,
                 row.required_total,
-                row.eligible_since.isoformat(),
+                _utc_iso(row.eligible_since),
             ]
         )
 

@@ -294,7 +294,26 @@ class TestEligibleSince:
         assert len(rows) == 1
         # The prize was earned on the 8th, when the last *required* week landed —
         # the bonus week three weeks later did not change when they qualified.
-        assert rows[0]["eligible_since"].startswith("2025-09-08")
+        assert rows[0]["eligible_since"] == "2025-09-08T00:00:00Z"
+
+    def test_eligible_since_is_stamped_utc_whatever_the_driver_returns(
+        self, client, db_sessionmaker
+    ):
+        _, required_ids, _ = _setup(client, required=1)
+        with db_sessionmaker() as db:
+            _checkin(
+                db,
+                STUDENTS[0],
+                required_ids[0],
+                datetime(2025, 9, 8, 17, 30, 5, 123456, tzinfo=timezone.utc),
+            )
+            db.commit()
+
+        # SQLite hands back a naive datetime and postgres an aware one; the column
+        # is written UTC either way, so the file must not read as local time on one
+        # and UTC on the other. Microseconds are dropped — this says which day
+        # someone qualified, not which microsecond.
+        assert _rows(client)[0]["eligible_since"] == "2025-09-08T17:30:05Z"
 
 
 # ---------------------------------------------------------------------------
