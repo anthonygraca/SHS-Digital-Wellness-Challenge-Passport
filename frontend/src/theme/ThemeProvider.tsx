@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 import type { ThemeConfig } from "../types/passport";
 import { DEFAULT_THEME, resolveThemeCopy } from "./themes";
@@ -65,11 +73,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, [state]);
 
-  return (
-    <ThemeContext.Provider value={{ ...state, applyTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
+  const value = useMemo(() => ({ ...state, applyTheme }), [state, applyTheme]);
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme(): ThemeContextValue {
