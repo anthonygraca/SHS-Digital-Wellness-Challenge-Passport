@@ -572,8 +572,8 @@ describe("Engagement report (US-23 / FR-F3)", () => {
     // API fixes. Counts, not percentages: the story asks how much students use
     // the content, and 120 is that answer.
     expect(contentRows().map((li) => li.textContent)).toEqual([
-      "Week details opened120",
-      "Tips shown after a scan30",
+      "Week details120",
+      "Tips after scan30",
     ]);
   });
 

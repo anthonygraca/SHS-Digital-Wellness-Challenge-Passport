@@ -12,10 +12,12 @@ import type {
 import { DownloadIcon, SchoolIcon } from "../../icons";
 import styles from "./Reports.module.css";
 
-/** The card's row label for each content ref, in the order the API sends them. */
+/** The card's row label for each content ref, in the order the API sends them.
+ *  Kept short enough to hold one line in the label rail at a phone width — the
+ *  attendance card's "Auto (event QR)" sets the length these have to match. */
 const CONTENT_LABEL: Record<ContentRef, string> = {
-  week_detail: "Week details opened",
-  tip: "Tips shown after a scan",
+  week_detail: "Week details",
+  tip: "Tips after scan",
 };
 
 /** Share of `whole` that `part` makes up, guarded for an empty denominator. */
