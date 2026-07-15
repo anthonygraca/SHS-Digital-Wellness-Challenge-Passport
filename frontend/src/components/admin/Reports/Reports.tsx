@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as api from "../../../api/reports";
 import type { AttendanceReport, ParticipationReport } from "../../../types/report";
-import { SchoolIcon } from "../../icons";
+import { DownloadIcon, SchoolIcon } from "../../icons";
 import styles from "./Reports.module.css";
 
 /** Share of `whole` that `part` makes up, guarded for an empty denominator. */
@@ -73,6 +73,18 @@ function AttendanceCard({ report }: { report: AttendanceReport }) {
   );
 }
 
+/** Hand the CSV to the browser as a download named the way the server named it. */
+function saveFile(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  // The object URL pins the blob in memory until it is revoked, and nothing else
+  // holds a reference to this one once the click is dispatched.
+  URL.revokeObjectURL(url);
+}
+
 /**
  * Reporting dashboard (FR-F1 / US-21) — screen A1 of the design prototype:
  * enrollment total plus a per-week completion funnel showing where students
@@ -81,6 +93,10 @@ function AttendanceCard({ report }: { report: AttendanceReport }) {
  * Always reports the campus's active challenge, which the server resolves — the
  * screen takes no challenge id, because "the challenge running now" is the only
  * one an admin can report on.
+ *
+ * The prize-list export (FR-F5 / US-26) is the one per-student read on the
+ * screen, and it never renders those rows: the CSV goes straight to the
+ * browser's downloads, so the dashboard itself stays aggregate.
  */
 export function Reports() {
   const navigate = useNavigate();
@@ -88,6 +104,7 @@ export function Reports() {
   const [attendance, setAttendance] = useState<AttendanceReport | null>(null);
   const [noActive, setNoActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -131,6 +148,24 @@ export function Reports() {
     void refresh();
   }, [refresh]);
 
+  const exportPrizeList = useCallback(async () => {
+    setExporting(true);
+    try {
+      const { blob, filename } = await api.exportPrizeCsv();
+      saveFile(blob, filename);
+      setError(null);
+    } catch (e) {
+      // Unlike a failed refresh, this always speaks up: there is no stale file
+      // on screen to fall back on, and an admin who gets no download owes an
+      // explanation rather than silence.
+      setError(
+        e instanceof api.ApiError ? e.message : "Could not export the prize list",
+      );
+    } finally {
+      setExporting(false);
+    }
+  }, []);
+
   return (
     <div className={styles.page}>
       <header className={styles.topbar}>
@@ -151,12 +186,30 @@ export function Reports() {
       </header>
 
       <main className={styles.content}>
-        {report && (
-          <p className={styles.eyebrow}>
-            {report.challenge.semester} · {report.challenge.name}
-          </p>
-        )}
-        <h1 className={styles.title}>Reporting dashboard</h1>
+        <div className={styles.header}>
+          <div>
+            {report && (
+              <p className={styles.eyebrow}>
+                {report.challenge.semester} · {report.challenge.name}
+              </p>
+            )}
+            <h1 className={styles.title}>Reporting dashboard</h1>
+          </div>
+
+          {/* Only once a challenge has loaded: with nothing published there is
+              no drawing to export, and the button would only 404. */}
+          {report && (
+            <button
+              type="button"
+              className={styles.exportBtn}
+              onClick={() => void exportPrizeList()}
+              disabled={exporting}
+            >
+              <DownloadIcon size={19} />
+              {exporting ? "Exporting…" : "Export prize list (CSV)"}
+            </button>
+          )}
+        </div>
 
         {error && (
           <p className={styles.error} role="alert">

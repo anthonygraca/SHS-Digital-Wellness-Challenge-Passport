@@ -1,4 +1,4 @@
-/** Inline SVG glyphs (school, lock) — self-contained, no icon-font dependency. */
+/** Inline SVG glyphs (school, download, lock…) — self-contained, no icon-font dependency. */
 
 export function SchoolIcon({ size = 22 }: { size?: number }) {
   return (
@@ -12,6 +12,23 @@ export function SchoolIcon({ size = 22 }: { size?: number }) {
     >
       <path d="M12 3 1 9l11 6 9-4.91V17h2V9L12 3zm0 13L5 12.2v-1.99l7 3.82 7-3.82v1.99L12 16z" />
       <path d="M6 13.18v2.32L12 19l6-3.5v-2.32l-6 3.27-6-3.27z" opacity="0.85" />
+    </svg>
+  );
+}
+
+/** The prototype's "download" glyph — the export affordance on screen A1. */
+export function DownloadIcon({ size = 19 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M12 3a1 1 0 0 1 1 1v9.59l3.29-3.3a1 1 0 1 1 1.42 1.42l-5 5a1 1 0 0 1-1.42 0l-5-5a1 1 0 1 1 1.42-1.42l3.29 3.3V4a1 1 0 0 1 1-1z" />
+      <path d="M4 18a1 1 0 0 1 1 1v1h14v-1a1 1 0 1 1 2 0v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1a1 1 0 0 1 1-1z" />
     </svg>
   );
 }

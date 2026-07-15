@@ -1,5 +1,6 @@
-/* Reporting dashboard (FR-F1 / US-21) — screen A1 of the design prototype:
-   an enrolled-count tile above a per-week completion funnel of horizontal bars.
+/* Reporting dashboard (FR-F1 / US-21, FR-F5 / US-26) — screen A1 of the design
+   prototype: an enrolled-count tile above a per-week completion funnel of
+   horizontal bars, with the prize-list export on the title row.
    Mobile-first: the prototype's desktop columns become one stacked column on a
    phone, with the funnel card full width at every size. */
 
@@ -72,7 +73,45 @@
   font-family: var(--wp-font-display);
   font-size: 30px;
   font-weight: 700;
-  margin: 0 0 24px;
+  margin: 0;
+}
+
+/* The prototype puts the export button on the right of the title row. On a phone
+   there is no room beside a 30px display title, so the button drops below it and
+   goes full width — an easy thumb target rather than a cramped corner one. The
+   row only re-forms once there is width for both. */
+.header {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.exportBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 20px;
+  border: none;
+  border-radius: 22px;
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.exportBtn:hover { background: color-mix(in srgb, var(--wp-primary) 88%, black); }
+.exportBtn:focus-visible { outline: 3px solid var(--wp-primary); outline-offset: 2px; }
+.exportBtn:disabled { opacity: 0.6; cursor: default; }
+
+@media (min-width: 560px) {
+  .header {
+    grid-template-columns: 1fr auto;
+    align-items: end;
+  }
+  .exportBtn { width: auto; }
 }
 
 .cardLabel {
