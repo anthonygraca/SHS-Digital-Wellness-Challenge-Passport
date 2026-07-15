@@ -19,7 +19,7 @@
 
     <h2>Step 2: Check In to Task</h2>
     <label>Task ID: <input type="number" id="taskId" value="1" /></label>
-    <button onclick="testCheckIn()">Test POST /api/checkins/</button>
+    <button onclick="testCheckIn()">Test POST /api/checkins-v2/</button>
     <pre id="checkin-result"></pre>
 
     <script>
@@ -55,7 +55,7 @@
             output.innerHTML = 'Loading...';
             
             try {
-                const res = await fetch('/api/checkins/', {
+                const res = await fetch('/api/checkins-v2/', {
                     method: 'POST',
                     credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
