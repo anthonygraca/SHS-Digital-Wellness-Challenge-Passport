@@ -178,6 +178,21 @@ is a later change behind the same API. Copy is split into `app_title` / `tagline
 app renders) and `copy_tone` (the descriptor authors write to). The student's passport response
 embeds the *resolved* theme, so a re-skin ships no code.
 
+**Duplication is a deep copy, not a template link (FR-B6).** `POST /api/challenges/{id}/duplicate`
+re-inserts the `Challenge`, its `Task` rows (positions preserved, so the gapless 1..N invariant holds
+for free) and their `QuizItem`s as new rows. The copy is always `draft` and carries no `Enrollment`s
+or `CheckIn`s — those belong to the original's run, not to the template. Task QR tokens need no
+handling at all: they are derived from task id, so copies mint their own. Dates are copied verbatim;
+there is no academic calendar to shift Fall→Spring against, and a draft is invisible to students
+until published, so stale dates are inert until the admin retimes them.
+
+The one wrinkle is `uq_challenge_campus_name_sem`: a copy cannot reuse name+semester. The request
+body's `name`/`semester` are both optional, and an omitted name makes the server derive the first
+free `"<base> (Copy)"` / `"(Copy N)"`, stripping any existing suffix so copies of copies don't stack.
+That derivation is what the admin UI relies on — it posts a name only when the admin actually types
+one, because echoing our own suggestion back would collide on the second duplicate into a semester
+rather than yielding `(Copy 2)`. An explicit, admin-chosen collision still returns 409.
+
 ---
 
 ## 6. The AI layer (the actual differentiator)
