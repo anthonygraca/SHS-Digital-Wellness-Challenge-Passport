@@ -1,4 +1,4 @@
-"""Reporting over a challenge (UC-10 / FR-F1, FR-F2, FR-F5).
+"""Reporting over a challenge (UC-10 / FR-F1, FR-F2, FR-F3, FR-F5).
 
 Read-only and cohort-wide, which is what separates this from passport.py: that
 module derives one student's progress, this one reads across all of them. Both
@@ -9,9 +9,13 @@ Nothing is cached or stored: every request re-derives the answer, so a check-in
 recorded a second ago is in the next refresh (US-21, scenario 2) and in the next
 export (US-26, scenario 2).
 
-participation_report and attendance_report are aggregate (FR-F6);
-prize_eligible_students is the one per-student read here, because a drawing list
-has to name its entrants.
+participation_report, attendance_report and engagement_report are aggregate
+(FR-F6); prize_eligible_students is the one per-student read here, because a
+drawing list has to name its entrants.
+
+engagement_report is the one report whose rows exist only because it wants them:
+check-ins and enrollments are written by features that would exist anyway, where
+a ContentView is written by instrumentation US-23 added (services/engagement.py).
 """
 
 from __future__ import annotations
@@ -20,10 +24,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.challenge import Challenge, CheckIn, Enrollment, Task
+from app.models.engagement import ContentView, GuideSession
 from app.models.student import Student
 from app.schemas.report import (
+    CONTENT_REF_ORDER,
     METHOD_ORDER,
     AttendanceReportOut,
+    ContentRefCountOut,
+    EngagementReportOut,
     MethodCountOut,
     ParticipationReportOut,
     PrizeEligibleRow,
@@ -124,6 +132,60 @@ def attendance_report(db: Session, challenge: Challenge) -> AttendanceReportOut:
         methods=[
             MethodCountOut(method=method, count=count) for method, count in counts.items()
         ],
+    )
+
+
+def engagement_report(db: Session, challenge: Challenge) -> EngagementReportOut:
+    """Content views and guide sessions for one challenge (FR-F3 / US-23).
+
+    Two counts from two tables, because the two things engage differently.
+    ContentView carries no challenge_id and is scoped by the join through Task —
+    the same join, for the same reason, as attendance_report's. GuideSession
+    carries challenge_id directly: a chat is not about a week, so there is no task
+    to inherit the scope from.
+
+    count(*), not count(distinct student_id), like the attendance report and
+    unlike the funnel: this counts *views*, not viewers. A student who opens the
+    same week on Monday and again on Friday engaged twice, and two is the honest
+    number.
+    """
+    rows = db.execute(
+        select(ContentView.content_ref, func.count().label("count"))
+        .join(Task, Task.id == ContentView.task_id)
+        .where(Task.challenge_id == challenge.id)
+        .group_by(ContentView.content_ref)
+    ).all()
+
+    # Every ref, always, in a fixed order — the same guarantee the method buckets
+    # make. "tip: 0" is a finding (nobody has scanned yet), not an absence to hide.
+    counts = dict.fromkeys(CONTENT_REF_ORDER, 0)
+    for content_ref, count in rows:
+        if content_ref in counts:
+            counts[content_ref] = count
+
+    # Counted across every row rather than summed from the buckets, exactly as
+    # attendance_report's total is: a ref outside ContentRef would be a write-path
+    # bug, and a total that quietly dropped it would hide the bug where this makes
+    # it surface as a gap in the reconciliation the report promises.
+    total_content_views = sum(count for _, count in rows)
+
+    guide_sessions = (
+        db.scalar(
+            select(func.count())
+            .select_from(GuideSession)
+            .where(GuideSession.challenge_id == challenge.id)
+        )
+        or 0
+    )
+
+    return EngagementReportOut(
+        challenge=ReportChallengeOut.model_validate(challenge),
+        total_content_views=total_content_views,
+        content_views=[
+            ContentRefCountOut(content_ref=content_ref, count=count)
+            for content_ref, count in counts.items()
+        ],
+        guide_sessions=guide_sessions,
     )
 
 

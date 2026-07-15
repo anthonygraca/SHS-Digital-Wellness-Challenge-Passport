@@ -5,7 +5,7 @@ import io
 import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_admin
@@ -15,7 +15,11 @@ from app.schemas.enrollment import (
     NO_ACTIVE_CHALLENGE_CODE,
     NO_ACTIVE_CHALLENGE_MESSAGE,
 )
-from app.schemas.report import AttendanceReportOut, ParticipationReportOut
+from app.schemas.report import (
+    AttendanceReportOut,
+    EngagementReportOut,
+    ParticipationReportOut,
+)
 from app.services import challenges as challenge_svc
 from app.services import reports as report_svc
 
@@ -30,17 +34,39 @@ PRIZE_CSV_COLUMNS = [
 ]
 
 
-def _active_challenge_or_404(db: Session, claims: dict) -> Challenge:
+def _report_challenge_or_404(
+    db: Session, claims: dict, challenge_id: int | None
+) -> Challenge:
     """Resolve the challenge every report in this router describes.
 
-    Scoped to the admin's own active challenge rather than an id in the path: a
-    report always describes "the challenge running right now" for the admin's
-    campus, so the SPA needs one request rather than a lookup then a fetch.
-    Resolving it here also means campus isolation is enforced before any counting
-    happens. Shared by every route so two cards on one dashboard can never
-    disagree about which challenge they are describing.
+    Omit ``challenge_id`` and this answers for the campus's active challenge —
+    "the challenge running right now", which is what an admin opening the
+    dashboard means. Pass one and it answers for that challenge instead, which is
+    what US-23's "both can be viewed per challenge" asks for and what makes a past
+    semester reportable at all.
+
+    Either way the campus comes from the caller's own claims and never from the
+    request, so campus isolation is enforced here, before any counting happens.
+    An id belonging to another campus is a **404, not a 403** — the convention
+    services/challenges.py already follows, so a report cannot be used to probe
+    which challenge ids exist elsewhere.
+
+    Published-only in both branches. The active resolver only ever returns a
+    published challenge, and an explicit id is held to the same rule rather than
+    quietly becoming the one way to report on a draft: "draft" means still being
+    authored, and its counts would describe a challenge no student could join.
+
+    Still shared by every route in this file, and now more load-bearing than
+    before: it is why one selector moves all four answers at once, so two cards on
+    one dashboard can never disagree about which challenge they describe.
     """
-    challenge = challenge_svc.get_active_challenge_for_campus(db, claims["campus_id"])
+    if challenge_id is None:
+        challenge = challenge_svc.get_active_challenge_for_campus(db, claims["campus_id"])
+    else:
+        challenge = challenge_svc.get_challenge(db, claims["campus_id"], challenge_id)
+        if challenge is not None and challenge.status != "published":
+            challenge = None
+
     if challenge is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -85,15 +111,19 @@ def _prize_csv_filename(challenge: Challenge) -> str:
 
 @router.get("/participation", response_model=ParticipationReportOut)
 def participation_report(
+    challenge_id: int | None = Query(None),
     claims: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Participation and the per-week completion funnel (FR-F1 / US-21)."""
-    return report_svc.participation_report(db, _active_challenge_or_404(db, claims))
+    return report_svc.participation_report(
+        db, _report_challenge_or_404(db, claims, challenge_id)
+    )
 
 
 @router.get("/attendance", response_model=AttendanceReportOut)
 def attendance_report(
+    challenge_id: int | None = Query(None),
     claims: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -104,18 +134,45 @@ def attendance_report(
     per response keeps each readable as one FR. Both resolve the challenge the
     same way, so they always answer for the same one and 404 together.
     """
-    return report_svc.attendance_report(db, _active_challenge_or_404(db, claims))
+    return report_svc.attendance_report(
+        db, _report_challenge_or_404(db, claims, challenge_id)
+    )
+
+
+@router.get("/engagement", response_model=EngagementReportOut)
+def engagement_report(
+    challenge_id: int | None = Query(None),
+    claims: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Content views and guide usage (FR-F3 / US-23).
+
+    Its own route for the reason /attendance is: a third grain — content looked
+    at, rather than weeks finished or check-ins captured — and one grain per
+    response keeps each response readable as one FR.
+
+    ``challenge_id`` is what US-23's "both can be viewed per challenge" asks for.
+    It lands on every route in this file rather than just this one so the cards
+    on one dashboard always describe the same challenge.
+    """
+    return report_svc.engagement_report(
+        db, _report_challenge_or_404(db, claims, challenge_id)
+    )
 
 
 @router.get("/prize-eligible.csv", response_class=Response)
 def prize_eligible_csv(
+    challenge_id: int | None = Query(None),
     claims: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """The prize drawing list as CSV (FR-F5 / US-26).
 
-    Campus-scoped to the admin's active challenge exactly like the reports above —
-    the drawing is always for the challenge running right now.
+    Campus-scoped exactly like the reports above, and takes the same
+    ``challenge_id``. That it follows the dashboard's selector is not a nicety:
+    the export is a *record* an admin acts on, and a drawing run against last
+    semester's list because the file quietly ignored the selector would be a real
+    error with real prizes attached.
 
     The header row is written unconditionally, so "nobody is eligible yet" is an
     empty-but-valid CSV rather than an error: it is a true answer, and the admin
@@ -125,7 +182,7 @@ def prize_eligible_csv(
     enough to build in memory, and the whole body has to exist anyway to set an
     accurate download.
     """
-    challenge = _active_challenge_or_404(db, claims)
+    challenge = _report_challenge_or_404(db, claims, challenge_id)
     rows = report_svc.prize_eligible_students(db, challenge)
 
     buf = io.StringIO()

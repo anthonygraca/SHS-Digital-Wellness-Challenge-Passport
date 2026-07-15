@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.schemas.challenge import CheckInMethod
+from app.schemas.engagement import ContentRef
 
 
 class ReportChallengeOut(BaseModel):
@@ -105,3 +106,46 @@ class AttendanceReportOut(BaseModel):
     challenge: ReportChallengeOut
     total_checkins: int
     methods: list[MethodCountOut]
+
+
+# The order the content buckets always arrive in. Week detail first: it is the
+# view a student chooses to make, where a tip is one they are handed. Doubles as
+# the seed for the all-refs-always guarantee in services/reports.py.
+CONTENT_REF_ORDER: tuple[ContentRef, ...] = ("week_detail", "tip")
+
+
+class ContentRefCountOut(BaseModel):
+    """How many views one piece of content accounted for.
+
+    ``content_ref`` reuses ContentRef rather than re-listing the vocabulary, for
+    the reason MethodCountOut reuses CheckInMethod: a third kind of content
+    cannot be added to the write paths without this report failing to validate.
+    """
+
+    content_ref: ContentRef
+    count: int
+
+
+class EngagementReportOut(BaseModel):
+    """Content views and guide usage (FR-F3 / US-23).
+
+    Counts only, like the reports above — how the views divide as a percentage is
+    the client's job (FR-F6 doctrine).
+
+    ``total_content_views`` plays the part ``total_checkins`` does: shipped rather
+    than left to be summed, so the buckets have something to reconcile *against*
+    and a ref the API failed to emit shows up as a gap instead of silently
+    redefining the denominator.
+
+    ``guide_sessions`` is a structural 0 today — the conversational guide is US-16
+    and nothing writes a GuideSession yet. It is reported rather than omitted for
+    the same reason AttendanceReportOut reports ``staff: 0``: the zero says the
+    guide FR-F3 anticipates is not yet wired, which an admin should be able to
+    read off the report rather than infer from a missing field. A count, not a
+    list, because there is nothing to break it down *by* — a chat has no ref.
+    """
+
+    challenge: ReportChallengeOut
+    total_content_views: int
+    content_views: list[ContentRefCountOut]
+    guide_sessions: int
