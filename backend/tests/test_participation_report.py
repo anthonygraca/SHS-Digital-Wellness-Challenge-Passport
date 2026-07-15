@@ -158,9 +158,7 @@ class TestCounting:
 
         assert _counts(client.get(REPORT).json()) == {1: 1, 2: 1, 3: 1}
 
-    def test_enrolled_students_who_never_checked_in_still_count_as_enrolled(
-        self, client
-    ):
+    def test_enrolled_students_who_never_checked_in_still_count_as_enrolled(self, client):
         cid, task_ids = _setup(client, weeks=2)
         _mark(client, cid, task_ids[0], STUDENTS[0])
 
