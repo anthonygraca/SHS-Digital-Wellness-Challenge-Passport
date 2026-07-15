@@ -815,8 +815,11 @@ function DuplicateChallengeModal({
   onDuplicated: (c: Challenge) => void;
 }) {
   // Prefilled rather than one-tap: the server would derive this same name, but
-  // the semester is the field an admin actually came here to change.
-  const [name, setName] = useState(`${challenge.name} (Copy)`);
+  // the semester is the field an admin actually came here to change. Strip an
+  // existing suffix first (mirroring the server) so duplicating a copy suggests
+  // "X (Copy)", not "X (Copy) (Copy)".
+  const suggestedName = `${challenge.name.replace(/\s*\(Copy(?: \d+)?\)$/, "")} (Copy)`;
+  const [name, setName] = useState(suggestedName);
   const [semester, setSemester] = useState(challenge.semester);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -826,7 +829,15 @@ function DuplicateChallengeModal({
     setError(null);
     setSaving(true);
     try {
-      onDuplicated(await api.duplicateChallenge(challenge.id, { name, semester }));
+      // Send the name only when the admin actually chose it. Left untouched, the
+      // suggestion is ours, not theirs — posting it verbatim would 409 the second
+      // time you duplicate into the same semester, when what the admin wants is
+      // the next free "(Copy N)". Omitting it lets the server derive that.
+      // An explicit, admin-typed collision still 409s, which is correct.
+      const chosenName = name.trim() === suggestedName ? undefined : name;
+      onDuplicated(
+        await api.duplicateChallenge(challenge.id, { name: chosenName, semester }),
+      );
     } catch (err) {
       setError(err instanceof api.ApiError ? err.message : "Duplicate failed");
     } finally {
@@ -867,7 +878,8 @@ function DuplicateChallengeModal({
             />
             <p className={styles.fieldHint}>
               Tasks, quiz items, and theme are copied, dates included. The copy
-              starts as a draft — retime it before publishing.
+              starts as a draft — retime it before publishing. If the suggested
+              name is taken, the next free number is used.
             </p>
           </div>
           <div className={styles.formActions}>

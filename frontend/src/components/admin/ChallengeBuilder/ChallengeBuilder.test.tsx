@@ -105,20 +105,49 @@ describe("ChallengeBuilder — duplicate (US-14 / FR-B6)", () => {
     expect(within(modal).getByLabelText(/semester/i)).toHaveValue("Fall 2025");
   });
 
-  it("sends the edited name and semester, then opens the new draft", async () => {
+  it("sends an admin-chosen name, then opens the new draft", async () => {
     const modal = await openDuplicateModal();
 
+    const name = within(modal).getByLabelText(/new challenge name/i);
+    await userEvent.clear(name);
+    await userEvent.type(name, "Spring 2026 Kickoff");
     const semester = within(modal).getByLabelText(/semester/i);
     await userEvent.clear(semester);
     await userEvent.type(semester, "Spring 2026");
     await userEvent.click(within(modal).getByRole("button", { name: /^duplicate$/i }));
 
     expect(mocks.duplicateChallenge).toHaveBeenCalledWith(7, {
-      name: "Fall 2025 - Stranger Things (Copy)",
+      name: "Spring 2026 Kickoff",
       semester: "Spring 2026",
     });
     // Navigating to the copy's detail view is what makes it "an editable draft".
     await waitFor(() => expect(mocks.getChallenge).toHaveBeenCalledWith(8));
+  });
+
+  it("suggests one copy suffix when duplicating a copy, not two", async () => {
+    mocks.listChallenges.mockResolvedValue([
+      { ...PRIOR, name: "Fall 2025 - Stranger Things (Copy 2)" },
+    ]);
+    render(<ChallengeBuilder />);
+    await screen.findByText("Fall 2025 - Stranger Things (Copy 2)");
+    await userEvent.click(screen.getByRole("button", { name: /duplicate/i }));
+    const modal = await screen.findByRole("dialog", { name: /duplicate challenge/i });
+
+    expect(within(modal).getByLabelText(/new challenge name/i)).toHaveValue(
+      "Fall 2025 - Stranger Things (Copy)",
+    );
+  });
+
+  it("omits an untouched name so the server can derive the next free one", async () => {
+    // Posting our own suggestion back would 409 on the second duplicate into the
+    // same semester, instead of yielding "(Copy 2)".
+    const modal = await openDuplicateModal();
+    await userEvent.click(within(modal).getByRole("button", { name: /^duplicate$/i }));
+
+    expect(mocks.duplicateChallenge).toHaveBeenCalledWith(7, {
+      name: undefined,
+      semester: "Fall 2025",
+    });
   });
 
   it("keeps the modal open and shows the reason when the name collides", async () => {
