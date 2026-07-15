@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Passport, PassportView } from "./Passport";
+import { ThemeProvider } from "../../theme/ThemeProvider";
 import { ApiError } from "../../api/challenges";
 import type {
   CheckInResult,
@@ -71,6 +72,7 @@ function passportWith(completed: number): PassportData {
   return {
     challengeName: "Stranger Things Wellness Challenge",
     theme: "stranger-things",
+    themeConfig: null,
     totalWeeks: 7,
     completedWeeks: completed,
     remainingWeeks: 7 - completed,
@@ -138,6 +140,7 @@ describe("PassportView prize-eligibility indicator (US-7 / FR-C5)", () => {
     const passport: PassportData = {
       challengeName: "Stranger Things Wellness Challenge",
       theme: "stranger-things",
+      themeConfig: null,
       totalWeeks: 4,
       completedWeeks: 3,
       remainingWeeks: 1,
@@ -226,6 +229,69 @@ describe("PassportView check-in (event detail + manual unlock)", () => {
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
     const sheet = screen.getByRole("dialog");
     expect(within(sheet).getByText("Dates TBA")).toBeInTheDocument();
+  });
+});
+
+describe("Passport theming (US-13 / FR-B4)", () => {
+  const themeConfig = {
+    id: "stranger-things",
+    palette: { primary: "#ff4438" },
+    logoUrl: "https://cdn.example.edu/st-logo.png",
+    heroUrl: null,
+    appTitle: "Upside Down Passport",
+    tagline: "Step through the first portal.",
+    copyTone: "dark, retro-80s",
+  };
+
+  afterEach(() => {
+    document.documentElement.style.cssText = "";
+    delete document.documentElement.dataset.theme;
+  });
+
+  it("renders the theme's logo and copy", () => {
+    render(
+      <ThemeProvider>
+        <PassportView passport={{ ...passportWith(3), themeConfig }} />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByText("Upside Down Passport")).toBeInTheDocument();
+    expect(screen.getByText("Step through the first portal.")).toBeInTheDocument();
+    expect(document.querySelector("img")).toHaveAttribute("src", themeConfig.logoUrl);
+  });
+
+  it("falls back to the default copy and shows no logo when unthemed", () => {
+    render(
+      <ThemeProvider>
+        <PassportView passport={passportWith(3)} />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByText("Wellness Passport")).toBeInTheDocument();
+    expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("applies the fetched theme's palette to the document", async () => {
+    // The whole point of US-13: the skin arrives as data on the passport.
+    sessionState.session = asSession({ isCurrentStudent: true });
+    const fetchData = vi.fn().mockResolvedValue({
+      ...passportWith(3),
+      themeConfig,
+    });
+
+    render(
+      <ThemeProvider>
+        <Passport fetchData={fetchData} checkInFn={vi.fn()} />
+      </ThemeProvider>,
+    );
+
+    await screen.findByText(/3 of 7 complete, 4 remaining/i);
+    await waitFor(() => {
+      expect(
+        document.documentElement.style.getPropertyValue("--wp-primary"),
+      ).toBe("#ff4438");
+    });
+    expect(document.documentElement.dataset.theme).toBe("stranger-things");
   });
 });
 

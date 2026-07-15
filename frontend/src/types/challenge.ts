@@ -24,6 +24,8 @@ export interface Challenge {
   semester: string;
   start_date: string; // ISO date "YYYY-MM-DD"
   end_date: string;
+  /** Selected re-skin preset (US-13); "" = default theme. */
+  theme_id: string;
   status: "draft" | "published";
   tasks: Task[];
   created_at: string;
@@ -38,6 +40,7 @@ export interface ChallengeSummary {
   semester: string;
   start_date: string;
   end_date: string;
+  theme_id: string;
   status: "draft" | "published";
   created_at: string;
   updated_at: string;
@@ -48,6 +51,7 @@ export interface ChallengeCreate {
   semester: string;
   start_date: string;
   end_date: string;
+  theme_id?: string;
 }
 
 export interface ChallengeUpdate {
@@ -55,6 +59,8 @@ export interface ChallengeUpdate {
   semester?: string;
   start_date?: string;
   end_date?: string;
+  /** "" resets to the default theme. */
+  theme_id?: string;
 }
 
 export interface TaskCreate {

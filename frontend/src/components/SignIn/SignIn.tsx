@@ -1,5 +1,5 @@
 import { startLogin } from "../../auth/auth";
-import { ACTIVE_THEME, THEMES } from "../../theme/themes";
+import { useThemeCopy } from "../../theme/ThemeProvider";
 import { LockIcon, SchoolIcon } from "../icons";
 import styles from "./SignIn.module.css";
 
@@ -11,7 +11,8 @@ import styles from "./SignIn.module.css";
  * navigation can be spied on in tests.
  */
 export function SignIn({ onSignIn = startLogin }: { onSignIn?: () => void }) {
-  const theme = THEMES[ACTIVE_THEME];
+  // Pre-auth, so no challenge theme is known yet: this shows the default skin's copy.
+  const { appTitle, tagline } = useThemeCopy();
 
   return (
     <main className={styles.screen}>
@@ -19,8 +20,8 @@ export function SignIn({ onSignIn = startLogin }: { onSignIn?: () => void }) {
         <span className={styles.mark}>
           <SchoolIcon size={40} />
         </span>
-        <h1 className={styles.title}>{theme.appTitle}</h1>
-        <p className={styles.tagline}>{theme.tagline}</p>
+        <h1 className={styles.title}>{appTitle}</h1>
+        <p className={styles.tagline}>{tagline}</p>
       </div>
 
       <section className={styles.sheet}>
