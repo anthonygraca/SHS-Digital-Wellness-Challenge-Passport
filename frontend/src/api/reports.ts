@@ -1,6 +1,7 @@
 import type {
   AttendanceReport,
   EngagementReport,
+  LearningOutcomeReport,
   ParticipationReport,
 } from "../types/report";
 import { ApiError } from "./http";
@@ -82,6 +83,20 @@ export function getEngagementReport(
   challengeId?: number,
 ): Promise<EngagementReport> {
   return request<EngagementReport>(`/engagement${scope(challengeId)}`);
+}
+
+/**
+ * Mean assessment score per learning-outcome tag (FR-F4 / US-24). 404s on the same
+ * condition the reports above do — every route here resolves its challenge the
+ * same way, which is what lets the dashboard treat one 404 as "nothing published".
+ *
+ * US-24's Gherkin never asks for `challengeId`; it is accepted anyway, like on
+ * every route here, so the dashboard's cards always describe the same challenge.
+ */
+export function getLearningOutcomeReport(
+  challengeId?: number,
+): Promise<LearningOutcomeReport> {
+  return request<LearningOutcomeReport>(`/outcomes${scope(challengeId)}`);
 }
 
 /**

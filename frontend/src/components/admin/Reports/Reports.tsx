@@ -7,6 +7,7 @@ import type {
   AttendanceReport,
   ContentRef,
   EngagementReport,
+  LearningOutcomeReport,
   ParticipationReport,
 } from "../../../types/report";
 import { DownloadIcon, SchoolIcon } from "../../icons";
@@ -153,6 +154,101 @@ function EngagementCard({ report }: { report: EngagementReport }) {
   );
 }
 
+/** An outcome tag as a row label: "know-your-numbers" → "Know your numbers".
+ *
+ *  A function rather than a lookup like CONTENT_LABEL, because there is no table
+ *  to write: the tag is admin-authored free text (US-12), so the vocabulary is
+ *  not knowable here. Only the separators and the first letter are touched — the
+ *  admin's own words are what an admin should read back, and a tag that is not
+ *  kebab-case simply passes through capitalized. */
+function outcomeLabel(tag: string): string {
+  const spaced = tag.replace(/[-_]+/g, " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/**
+ * Learning outcomes (FR-F4 / US-24) — the card that replaces Lauren's hand-scoring.
+ *
+ * The mean arrives as a raw 0..1 and is rendered as a percentage here, which is the
+ * same division of labour the attendance card's auto share follows: the server ships
+ * the aggregate, the client decides it looks like "84%".
+ *
+ * A tag nobody has answered is named in prose below the bars rather than given a row
+ * of its own. Its mean is null, and any bar drawn for it would either be a 0% sliver
+ * — indistinguishable from an outcome the cohort genuinely bombed, which is the one
+ * finding here worth acting on — or an empty rail saying nothing. Which questions
+ * have not landed yet is a real finding too; it just is not a score, so it does not
+ * get a score's shape. Same instinct as the guide row above.
+ *
+ * The API also ships human_scored_count, 0 everywhere until US-19's override lands.
+ * The card stays silent while it is 0 rather than drawing a permanently-empty
+ * provenance badge — the zero is a fact about the API, and an admin reading this
+ * screen has nothing to do about it until reflections can be overridden at all.
+ */
+function OutcomesCard({ report }: { report: LearningOutcomeReport }) {
+  // Split, not filtered: both halves are rendered, in different shapes.
+  const scored = report.outcomes.filter((o) => o.response_count > 0);
+  const unanswered = report.outcomes.filter((o) => o.response_count === 0);
+
+  return (
+    <section className={styles.outcomesCard}>
+      <h2 className={styles.cardLabel}>Learning outcomes</h2>
+
+      {report.total_responses === 0 ? (
+        // The whole card, bars and prose alike, collapses to one line: with no
+        // responses anywhere there is no aggregate to show, and listing every tag
+        // as unanswered would bury that under noise.
+        <p className={styles.outcomesEmpty}>
+          {report.outcomes.length === 0
+            ? "No assessment items tagged to an outcome yet."
+            : "No assessment responses yet."}
+        </p>
+      ) : (
+        <>
+          <ul className={styles.outcomeList} aria-label="Mean score by learning outcome">
+            {scored.map((o) => (
+              <li key={o.outcome_tag} className={styles.outcomeRow}>
+                <span className={styles.outcomeLabel}>
+                  {outcomeLabel(o.outcome_tag)}
+                </span>
+                <span className={styles.outcomeBar} aria-hidden="true">
+                  <span
+                    className={styles.outcomeFill}
+                    // percent(mean, 1) rather than mean * 100: one rounding rule
+                    // for every number on this screen. mean_score is non-null here
+                    // because response_count > 0 — the ?? satisfies the type, it is
+                    // not a real branch.
+                    style={{ width: `${percent(o.mean_score ?? 0, 1)}%` }}
+                  />
+                </span>
+                <span className={styles.outcomeValue}>
+                  {percent(o.mean_score ?? 0, 1)}%
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          {/* The mean is the average of every response, not of the rows above — a
+              tag answered three times does not weigh what one answered three
+              hundred times does. Shipped by the server for exactly that reason. */}
+          <p className={styles.outcomeTotal}>
+            {report.total_responses}{" "}
+            {report.total_responses === 1 ? "response" : "responses"} ·{" "}
+            {percent(report.mean_score ?? 0, 1)}% average
+          </p>
+
+          {unanswered.length > 0 && (
+            <p className={styles.outcomeUnanswered}>
+              Not answered yet:{" "}
+              {unanswered.map((o) => outcomeLabel(o.outcome_tag)).join(", ")}
+            </p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 /** Hand the CSV to the browser as a download named the way the server named it. */
 function saveFile(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -189,6 +285,7 @@ export function Reports() {
   const [report, setReport] = useState<ParticipationReport | null>(null);
   const [attendance, setAttendance] = useState<AttendanceReport | null>(null);
   const [engagement, setEngagement] = useState<EngagementReport | null>(null);
+  const [outcomes, setOutcomes] = useState<LearningOutcomeReport | null>(null);
   const [challenges, setChallenges] = useState<ChallengeSummary[]>([]);
   // undefined, not null: it is passed straight to the API layer, which omits the
   // parameter entirely for undefined and so asks for the active challenge.
@@ -199,18 +296,21 @@ export function Reports() {
 
   const refresh = useCallback(async (challengeId?: number) => {
     try {
-      // Promise.all rather than three awaits or allSettled: the cards describe
+      // Promise.all rather than four awaits or allSettled: the cards describe
       // one moment in one challenge, so they land together or not at all. A
       // partial update could show a funnel from now beside an auto share from a
       // minute ago, and nothing on screen would say which was stale.
-      const [participation, attendanceNext, engagementNext] = await Promise.all([
-        api.getParticipationReport(challengeId),
-        api.getAttendanceReport(challengeId),
-        api.getEngagementReport(challengeId),
-      ]);
+      const [participation, attendanceNext, engagementNext, outcomesNext] =
+        await Promise.all([
+          api.getParticipationReport(challengeId),
+          api.getAttendanceReport(challengeId),
+          api.getEngagementReport(challengeId),
+          api.getLearningOutcomeReport(challengeId),
+        ]);
       setReport(participation);
       setAttendance(attendanceNext);
       setEngagement(engagementNext);
+      setOutcomes(outcomesNext);
       setNoActive(false);
       setError(null);
     } catch (e) {
@@ -221,12 +321,13 @@ export function Reports() {
         setReport(null);
         setAttendance(null);
         setEngagement(null);
+        setOutcomes(null);
         setError(null);
         return;
       }
       // A failed refresh keeps the numbers already on screen rather than
       // blanking them; only speak up when there is nothing to keep. Promise.all
-      // set no card, so all three keep their last good read.
+      // set no card, so all four keep their last good read.
       setReport((prev) => {
         if (prev === null) {
           setError(
@@ -364,7 +465,7 @@ export function Reports() {
 
         {!report && !error && !noActive && <p className={styles.empty}>Loading…</p>}
 
-        {report && attendance && engagement && (
+        {report && attendance && engagement && outcomes && (
           <>
             <section className={styles.statCard}>
               <span className={styles.statIcon}>
@@ -410,6 +511,7 @@ export function Reports() {
 
             <AttendanceCard report={attendance} />
             <EngagementCard report={engagement} />
+            <OutcomesCard report={outcomes} />
           </>
         )}
       </main>
