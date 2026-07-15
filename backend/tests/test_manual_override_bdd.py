@@ -84,15 +84,13 @@ def _ensure_student(client, context: dict) -> None:
 
 def _audits(client, context: dict) -> list[dict]:
     return client.get(
-        f"/api/challenges/{context['challenge_id']}"
-        f"/tasks/{context['task_id']}/audits"
+        f"/api/challenges/{context['challenge_id']}/tasks/{context['task_id']}/audits"
     ).json()
 
 
 def _checkins(client, context: dict) -> list[dict]:
     return client.get(
-        f"/api/challenges/{context['challenge_id']}"
-        f"/tasks/{context['task_id']}/checkins"
+        f"/api/challenges/{context['challenge_id']}/tasks/{context['task_id']}/checkins"
     ).json()
 
 
