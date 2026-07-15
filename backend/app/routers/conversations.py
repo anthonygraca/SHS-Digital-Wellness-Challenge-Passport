@@ -8,16 +8,19 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_student
 from app.db import get_db
-from app.models.challenge import Challenge, CheckIn, Enrollment, Task
+from app.models.challenge import Challenge, CheckIn, Task
 from app.models.conversation import ConversationMessage, ConversationSession
-from app.services.ai_guide import ConversationGuideService, get_conversation_guide_service
+from app.services.ai_guide import (
+    ConversationGuideService,
+    get_conversation_guide_service,
+)
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 

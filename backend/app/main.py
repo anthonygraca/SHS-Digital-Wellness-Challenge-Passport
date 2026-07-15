@@ -11,6 +11,7 @@ from app.routers import (
     auth,
     challenges,
     checkins,
+    conversations,
     enrollment,
     guide,
     passport,
@@ -36,6 +37,7 @@ app.include_router(assessments.router)
 app.include_router(reports.router)
 app.include_router(themes.router)
 app.include_router(guide.router)
+app.include_router(conversations.router)
 
 
 @app.get("/healthz")

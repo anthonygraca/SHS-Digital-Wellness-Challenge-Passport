@@ -41,6 +41,16 @@ class Settings(BaseSettings):
 
     # AI feature flags
     ai_tips_enabled: bool = True  # Enable personalized tips (US-15)
+    conversation_guide_enabled: bool = True  # Enable conversation guide (US-16)
+
+    # Conversation guide settings (US-16)
+    max_conversation_history: int = 20  # Max messages to include in context
+
+    # Theme personas for conversation guide (US-16)
+    theme_personas: dict[str, str] = {
+        "default": "You are a supportive wellness guide for CSUB students.",
+        "Stranger Things": "You are a wellness guide with an adventurous, mysterious tone inspired by Stranger Things. Stay supportive and informative while adding subtle references to discovery and overcoming challenges.",
+    }
 
     # SHS content grounding (US-15, FR-E1, FR-E6)
     # In production, this would be a vector database or S3 reference
