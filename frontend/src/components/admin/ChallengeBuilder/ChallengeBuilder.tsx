@@ -7,6 +7,8 @@ import type {
   AssessmentItem,
   Challenge,
   ChallengeSummary,
+  CheckIn,
+  CheckInAudit,
   Task,
 } from "../../../types/challenge";
 import type { Theme } from "../../../types/theme";
@@ -125,6 +127,7 @@ function ChallengeDetail({
   const [addingTask, setAddingTask] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [itemsTask, setItemsTask] = useState<Task | null>(null);
+  const [checkinsTask, setCheckinsTask] = useState<Task | null>(null);
   const [editingTheme, setEditingTheme] = useState(false);
   const [themes, setThemes] = useState<Theme[]>([]);
   const [publishing, setPublishing] = useState(false);
@@ -238,6 +241,7 @@ function ChallengeDetail({
           onDelete={(taskId) => void handleDeleteTask(taskId)}
           onReorder={handleReorder}
           onManageItems={setItemsTask}
+          onManageCheckins={setCheckinsTask}
         />
 
         <button
@@ -283,6 +287,14 @@ function ChallengeDetail({
         />
       )}
 
+      {checkinsTask && (
+        <CompletionOverridePanel
+          challengeId={challenge.id}
+          task={checkinsTask}
+          onClose={() => setCheckinsTask(null)}
+        />
+      )}
+
       {editingTheme && challenge.theme_id && (
         <ThemeEditorModal
           themeId={challenge.theme_id}
@@ -304,12 +316,14 @@ function TaskList({
   onDelete,
   onReorder,
   onManageItems,
+  onManageCheckins,
 }: {
   tasks: Task[];
   onEdit: (t: Task) => void;
   onDelete: (id: number) => void;
   onReorder: (ids: number[]) => Promise<void>;
   onManageItems: (t: Task) => void;
+  onManageCheckins: (t: Task) => void;
 }) {
   const dragSrc = useRef<number | null>(null); // index being dragged
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
@@ -416,6 +430,14 @@ function TaskList({
               aria-label={`Assessment items for ${task.title}`}
             >
               Items ({task.assessment_items?.length ?? 0})
+            </button>
+            <button
+              type="button"
+              className={styles.btnGhost}
+              onClick={() => onManageCheckins(task)}
+              aria-label={`Manage check-ins for ${task.title}`}
+            >
+              Check-ins
             </button>
             <button
               type="button"
@@ -1273,4 +1295,357 @@ export function ChallengeBuilder() {
       </main>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Manual completion override + audit (FR-D6 / US-27)
+// ---------------------------------------------------------------------------
+
+function fmtTs(ts: string) {
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime())
+    ? ts
+    : d.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+}
+
+/**
+ * Admin surface for FR-D6: mark a student complete by hand, correct an
+ * erroneous check-in, or remove one — each write leaving an audit row.
+ *
+ * Fetches on mount rather than reading off the task (as AssessmentItemsPanel
+ * does): TaskOut deliberately carries no check-ins array, since that would be an
+ * unbounded per-task payload on every builder load.
+ */
+function CompletionOverridePanel({
+  challengeId,
+  task,
+  onClose,
+}: {
+  challengeId: number;
+  task: Task;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<"checkins" | "audit">("checkins");
+  const [checkins, setCheckins] = useState<CheckIn[]>([]);
+  const [audits, setAudits] = useState<CheckInAudit[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  // The check-in awaiting a removal reason, if any.
+  const [removing, setRemoving] = useState<CheckIn | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [c, a] = await Promise.all([
+        api.listCheckIns(challengeId, task.id),
+        api.listCheckInAudits(challengeId, task.id),
+      ]);
+      setCheckins(c);
+      setAudits(a);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Could not load check-ins");
+    } finally {
+      setLoading(false);
+    }
+  }, [challengeId, task.id]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function handleRemove(reason: string) {
+    if (!removing) return;
+    try {
+      await api.removeCheckIn(challengeId, task.id, removing.id, { reason });
+      setRemoving(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Remove failed");
+    }
+  }
+
+  return (
+    <div
+      className={styles.overlay}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Check-ins for ${task.title}`}
+    >
+      <div
+        className={`${styles.modal} ${styles.modalWide} ${styles.overridePanel}`}
+      >
+        <h2>Check-ins — {task.title}</h2>
+        {error && <p className={styles.error}>{error}</p>}
+
+        <div className={styles.tabRow} role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "checkins"}
+            className={tab === "checkins" ? styles.tabBtnActive : styles.tabBtn}
+            onClick={() => setTab("checkins")}
+          >
+            Check-ins ({checkins.length})
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "audit"}
+            className={tab === "audit" ? styles.tabBtnActive : styles.tabBtn}
+            onClick={() => setTab("audit")}
+          >
+            Audit ({audits.length})
+          </button>
+        </div>
+
+        {loading && <p className={styles.empty}>Loading…</p>}
+
+        {!loading && tab === "checkins" && (
+          <>
+            {checkins.length === 0 && !adding && (
+              <p className={styles.empty}>
+                No check-ins for this task yet.
+              </p>
+            )}
+
+            {checkins.length > 0 && (
+              <ul className={styles.checkinList} aria-label="Check-ins">
+                {checkins.map((c) => (
+                  <li key={c.id} className={styles.checkinRow}>
+                    <span className={styles.checkinSubject}>{c.student_subject}</span>
+                    <div className={styles.checkinMeta}>
+                      <span className={styles.methodBadge}>{c.method}</span>
+                      <span>{fmtTs(c.ts)}</span>
+                    </div>
+                    {c.verified_by && (
+                      <div className={styles.checkinMeta}>by {c.verified_by}</div>
+                    )}
+                    {removing?.id === c.id ? (
+                      <ReasonPrompt
+                        label={`Remove the check-in for ${c.student_subject}`}
+                        submitLabel="Remove"
+                        onCancel={() => setRemoving(null)}
+                        onSubmit={handleRemove}
+                      />
+                    ) : (
+                      <div className={styles.checkinActions}>
+                        <button
+                          type="button"
+                          className={styles.btnDanger}
+                          onClick={() => setRemoving(c)}
+                          aria-label={`Remove check-in for ${c.student_subject}`}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {adding ? (
+              <ManualCheckInForm
+                challengeId={challengeId}
+                taskId={task.id}
+                onCancel={() => setAdding(false)}
+                onSaved={() => { setAdding(false); void load(); }}
+              />
+            ) : (
+              <button
+                type="button"
+                className={styles.btnSecondary}
+                onClick={() => { setError(null); setAdding(true); }}
+              >
+                + Mark complete
+              </button>
+            )}
+          </>
+        )}
+
+        {!loading && tab === "audit" && (
+          <>
+            {audits.length === 0 && (
+              <p className={styles.empty}>No changes recorded yet.</p>
+            )}
+            {audits.length > 0 && (
+              <ul className={styles.auditList} aria-label="Audit trail">
+                {audits.map((a) => (
+                  <li key={a.id} className={styles.auditRow}>
+                    <div className={styles.checkinMeta}>
+                      <span className={`${styles.actionBadge} ${actionClass(a.action)}`}>
+                        {a.action}
+                      </span>
+                      <span>{fmtTs(a.ts)}</span>
+                    </div>
+                    <div className={styles.checkinMeta}>by {a.actor_subject}</div>
+                    <p className={styles.auditReason}>{a.reason}</p>
+                    {a.prior_state && (
+                      <details>
+                        <summary>Prior state</summary>
+                        <pre className={styles.auditSnapshot}>
+                          {JSON.stringify(a.prior_state, null, 2)}
+                        </pre>
+                      </details>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+
+        <div className={styles.formActions}>
+          <button type="button" className={styles.btnPrimary} onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function actionClass(action: CheckInAudit["action"]) {
+  if (action === "create") return styles.actionCreate;
+  if (action === "update") return styles.actionUpdate;
+  return styles.actionDelete;
+}
+
+/** Inline reason capture. Not window.confirm — a reason is mandatory (FR-D6). */
+function ReasonPrompt({
+  label,
+  submitLabel,
+  onCancel,
+  onSubmit,
+}: {
+  label: string;
+  submitLabel: string;
+  onCancel: () => void;
+  onSubmit: (reason: string) => void | Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const blank = reason.trim() === "";
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (blank) return;
+    setSaving(true);
+    try {
+      await onSubmit(reason.trim());
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className={styles.itemForm} onSubmit={(e) => void handleSubmit(e)}>
+      <div className={styles.fieldGroup}>
+        <label htmlFor="removeReason">{label} — reason</label>
+        <textarea
+          id="removeReason"
+          rows={2}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Why is this change being made?"
+          required
+        />
+      </div>
+      <div className={styles.formActions}>
+        <button type="button" className={styles.btnSecondary} onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className={styles.btnDanger} disabled={saving || blank}>
+          {saving ? "Working…" : submitLabel}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function ManualCheckInForm({
+  challengeId,
+  taskId,
+  onCancel,
+  onSaved,
+}: {
+  challengeId: number;
+  taskId: number;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [subject, setSubject] = useState("");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const incomplete = subject.trim() === "" || reason.trim() === "";
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (incomplete) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await api.createManualCheckIn(challengeId, taskId, {
+        student_subject: subject.trim(),
+        reason: reason.trim(),
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof api.ApiError ? messageFor(err) : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className={styles.itemForm} onSubmit={(e) => void handleSubmit(e)}>
+      {error && <p className={styles.error}>{error}</p>}
+      <div className={styles.fieldGroup}>
+        <label htmlFor="studentSubject">Student SSO subject</label>
+        <input
+          id="studentSubject"
+          type="text"
+          inputMode="email"
+          autoComplete="off"
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          placeholder="student@csub.edu"
+          required
+        />
+      </div>
+      <div className={styles.fieldGroup}>
+        <label htmlFor="manualReason">Reason</label>
+        <textarea
+          id="manualReason"
+          rows={2}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Why is this being marked by hand?"
+          required
+        />
+      </div>
+      <div className={styles.formActions}>
+        <button type="button" className={styles.btnSecondary} onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className={styles.btnPrimary} disabled={saving || incomplete}>
+          {saving ? "Saving…" : "Mark complete"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** Turn the API's 409/404 into something an admin at a booth can act on. */
+function messageFor(err: InstanceType<typeof api.ApiError>) {
+  if (err.status === 409) {
+    return "That student is already checked in for this task — use Remove, then re-add.";
+  }
+  return err.message;
 }

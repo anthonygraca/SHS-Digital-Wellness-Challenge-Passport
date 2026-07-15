@@ -10,6 +10,11 @@ import type {
   AssessmentItem,
   AssessmentItemCreate,
   AssessmentItemUpdate,
+  CheckIn,
+  CheckInAudit,
+  CheckInCorrect,
+  CheckInRemove,
+  ManualCheckInCreate,
 } from "../types/challenge";
 import { request as httpRequest } from "./http";
 
@@ -139,4 +144,62 @@ export function deleteAssessmentItem(
     `/${challengeId}/tasks/${taskId}/items/${itemId}`,
     { method: "DELETE" },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Manual completion override + audit (FR-D6 / US-27)
+// ---------------------------------------------------------------------------
+
+export function listCheckIns(
+  challengeId: number,
+  taskId: number,
+): Promise<CheckIn[]> {
+  return request<CheckIn[]>(`/${challengeId}/tasks/${taskId}/checkins`);
+}
+
+export function createManualCheckIn(
+  challengeId: number,
+  taskId: number,
+  data: ManualCheckInCreate,
+): Promise<CheckIn> {
+  return request<CheckIn>(
+    `/${challengeId}/tasks/${taskId}/checkins`,
+    { method: "POST", body: JSON.stringify(data) },
+  );
+}
+
+export function correctCheckIn(
+  challengeId: number,
+  taskId: number,
+  checkInId: number,
+  data: CheckInCorrect,
+): Promise<CheckIn> {
+  return request<CheckIn>(
+    `/${challengeId}/tasks/${taskId}/checkins/${checkInId}`,
+    { method: "PATCH", body: JSON.stringify(data) },
+  );
+}
+
+/** Removal carries a body: a reason is required even to delete (FR-D6). */
+export function removeCheckIn(
+  challengeId: number,
+  taskId: number,
+  checkInId: number,
+  data: CheckInRemove,
+): Promise<void> {
+  return request<void>(
+    `/${challengeId}/tasks/${taskId}/checkins/${checkInId}`,
+    { method: "DELETE", body: JSON.stringify(data) },
+  );
+}
+
+export function listCheckInAudits(
+  challengeId: number,
+  taskId: number,
+  studentSubject?: string,
+): Promise<CheckInAudit[]> {
+  const qs = studentSubject
+    ? `?student_subject=${encodeURIComponent(studentSubject)}`
+    : "";
+  return request<CheckInAudit[]>(`/${challengeId}/tasks/${taskId}/audits${qs}`);
 }
