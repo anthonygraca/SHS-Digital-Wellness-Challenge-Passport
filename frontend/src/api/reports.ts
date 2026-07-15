@@ -1,4 +1,4 @@
-import type { ParticipationReport } from "../types/report";
+import type { AttendanceReport, ParticipationReport } from "../types/report";
 import { ApiError } from "./http";
 
 // Relative path: proxied to FastAPI in dev, same-origin in prod.
@@ -35,4 +35,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
  */
 export function getParticipationReport(): Promise<ParticipationReport> {
   return request<ParticipationReport>("/participation");
+}
+
+/**
+ * Auto-vs-manual attendance breakdown for the campus's active challenge
+ * (FR-F2 / US-22). 404s on the same condition /participation does — both
+ * resolve the same active challenge server-side.
+ */
+export function getAttendanceReport(): Promise<AttendanceReport> {
+  return request<AttendanceReport>("/attendance");
 }
