@@ -26,6 +26,20 @@ from app.models.student import Student  # noqa: F401  (register on Base.metadata
 from app.models.theme import Theme  # noqa: F401  (register on Base.metadata)
 
 
+def pytest_bdd_apply_tag(tag, function):
+    """Turn a Gherkin tag into a selectable pytest marker.
+
+    pytest-bdd's default is `getattr(pytest.mark, tag)`, which yields marker names
+    like "FR-D6" and "source:UC-11". Those are not Python identifiers, so `-m` —
+    which parses its argument as a Python expression — reads "FR-D6" as subtraction
+    and chokes on the colon outright. Normalizing to "FR_D6" / "source_UC_11" keeps
+    the .feature files verbatim against docs/features.md while making `-m FR_D6` work.
+    """
+    name = tag.replace("-", "_").replace(":", "_").replace(".", "_")
+    getattr(pytest.mark, name)(function)
+    return True  # handled — skip pytest-bdd's default tagging
+
+
 @pytest.fixture
 def db_sessionmaker():
     engine = create_engine(
