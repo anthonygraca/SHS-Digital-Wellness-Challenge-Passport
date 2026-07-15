@@ -14,8 +14,11 @@ export async function fetchPassport(): Promise<Passport | null> {
 }
 
 /**
- * Record a manual check-in for a week (demo stand-in for the QR scan). Returns the
- * refreshed passport so the caller can update progress, or null on failure.
+ * Record a manual check-in for a week using the old passport endpoint.
+ * Returns the refreshed passport so the caller can update progress, or null on failure.
+ * 
+ * Note: This uses the legacy /api/checkins endpoint from passport router,
+ * not the new US-15 checkins router which requires task_id.
  */
 export async function checkIn(weekNo: number): Promise<Passport | null> {
   const res = await fetch(`${API_BASE}/api/checkins`, {

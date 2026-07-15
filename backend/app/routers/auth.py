@@ -67,6 +67,7 @@ async def acs(
         affiliation=assertion.affiliation,
         campus_id=campus_id,
         student_id=student.id,
+        role=student.role,
     )
     settings = get_settings()
     response = RedirectResponse(return_to, status_code=status.HTTP_302_FOUND)
@@ -90,10 +91,14 @@ def session(request: Request):
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Not signed in"
         )
     affiliation = claims.get("affiliation", "")
+    role = claims.get("role", "student")
+    student_id = claims.get("student_id")
     return SessionOut(
         subject=claims["sub"],
         affiliation=affiliation,
         isCurrentStudent=is_current_student(affiliation),
+        role=role,
+        student_id=student_id,
     )
 
 

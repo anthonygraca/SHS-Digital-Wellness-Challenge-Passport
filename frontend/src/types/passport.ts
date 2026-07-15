@@ -2,6 +2,7 @@ export type WeekStatus = "locked" | "available" | "complete";
 
 export interface PassportWeek {
   weekNo: number;
+  taskId: number; // Added for US-15: task ID for check-in endpoint
   title: string;
   caption: string;
   activityType: string;

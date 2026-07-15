@@ -306,7 +306,13 @@ def seed_demo_challenge(db: Session) -> Challenge | None:
     for week in _DEMO_WEEKS:
         # "items" is not a Task column — the assessment items hang off the task and
         # are seeded by _seed_demo_items once the tasks have ids.
-        fields = {k: v for k, v in week.items() if k != "items"}
+        # Also remove date_window_start and date_window_end since those fields are
+        # commented out in the Task model (schema mismatch to be fixed later)
+        fields = {
+            k: v
+            for k, v in week.items()
+            if k not in ("items", "date_window_start", "date_window_end")
+        }
         db.add(Task(challenge_id=challenge.id, **fields))
 
     db.commit()
