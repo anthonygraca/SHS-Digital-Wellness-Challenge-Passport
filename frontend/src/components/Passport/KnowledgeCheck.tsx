@@ -47,9 +47,11 @@ function verdictFromResult(result: McqResult, chosen: string): Verdict {
 function McqQuestion({
   item,
   onSubmit,
+  online,
 }: {
   item: KnowledgeCheckItem;
   onSubmit: (itemId: number, answer: string) => Promise<McqResult>;
+  online: boolean;
 }) {
   const [choice, setChoice] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(() =>
@@ -63,6 +65,20 @@ function McqQuestion({
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (choice === null || answered) return;
+    if (!online) {
+      // Refuse before the request, the same way check-in and scanning do (US-6 /
+      // FR-C4) — nothing queued, nothing optimistic, the item still unanswered.
+      //
+      // Saying "nothing was recorded" matters more here than anywhere else in the
+      // app: an MCQ is one attempt, so a student left guessing whether a failed
+      // submit counted has to assume they burned it. Offline a fetch rejects rather
+      // than resolving !ok, so without this the catch below would tell them only
+      // that something went wrong.
+      setError(
+        "Answering needs a connection. Nothing was recorded — reconnect and try again.",
+      );
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -159,10 +175,13 @@ export function KnowledgeCheck({
   weekNo,
   fetchItems = fetchWeekItems,
   submitFn = submitMcq,
+  online = true,
 }: {
   weekNo: number;
   fetchItems?: (weekNo: number) => Promise<KnowledgeCheckItem[]>;
   submitFn?: (itemId: number, answer: string) => Promise<McqResult>;
+  /** Drives the refusal to start a network action (US-6 / FR-C4). */
+  online?: boolean;
 }) {
   const [items, setItems] = useState<KnowledgeCheckItem[]>([]);
 
@@ -188,7 +207,12 @@ export function KnowledgeCheck({
       {items.map((item) => (
         // Keyed by item id so switching weeks rebuilds each question's state rather
         // than carrying the previous week's selection into it.
-        <McqQuestion key={item.id} item={item} onSubmit={submitFn} />
+        <McqQuestion
+          key={item.id}
+          item={item}
+          onSubmit={submitFn}
+          online={online}
+        />
       ))}
     </section>
   );

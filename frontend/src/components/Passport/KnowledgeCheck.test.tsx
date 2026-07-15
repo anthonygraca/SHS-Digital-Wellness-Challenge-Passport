@@ -165,6 +165,34 @@ describe("MCQ knowledge check (US-18 / FR-E4)", () => {
     );
   });
 
+  it("refuses to submit offline, without sending anything (US-6 / FR-C4)", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn();
+    const fetchItems = vi.fn().mockResolvedValue([asItem()]);
+    render(
+      <KnowledgeCheck
+        weekNo={3}
+        fetchItems={fetchItems}
+        submitFn={submit}
+        online={false}
+      />,
+    );
+
+    await user.click(await screen.findByRole("radio", { name: CORRECT }));
+    await user.click(submitButton());
+
+    // "Nothing was recorded" is load-bearing copy here: an MCQ is one attempt, so a
+    // student left unsure whether a failed submit counted must assume they burned it.
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent(/needs a connection/i);
+    expect(notice).toHaveTextContent(/nothing was recorded/i);
+
+    // Refused before the request, not after it failed — nothing queued to replay.
+    expect(submit).not.toHaveBeenCalled();
+    // And the question is still open, so it can be answered on reconnect.
+    expect(option(CORRECT)).toBeEnabled();
+  });
+
   it("renders nothing for a week with no knowledge check", async () => {
     const { container } = render(
       <KnowledgeCheck

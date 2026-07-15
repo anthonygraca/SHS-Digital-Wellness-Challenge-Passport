@@ -324,8 +324,9 @@ export function PassportView({
 
             {/* Renders nothing when the week has no questions, which is most weeks.
                 Deliberately does not gate the check-in below: FR-E4 says nothing about
-                coupling them, and doing so would change the UC-3 core loop. */}
-            <KnowledgeCheck weekNo={selectedWeek.weekNo} />
+                coupling them, and doing so would change the UC-3 core loop. Offline it
+                refuses to submit rather than queueing, same as check-in (US-6). */}
+            <KnowledgeCheck weekNo={selectedWeek.weekNo} online={online} />
 
             {selectedWeek.status === "complete" ? (
               <button type="button" className={styles.checkedIn} disabled>
