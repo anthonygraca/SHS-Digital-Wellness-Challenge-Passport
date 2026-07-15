@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.challenge import CheckIn, Task
 from app.services.challenges import get_active_challenge_for_campus
+from app.services.qr import verify_event_token
 
 WeekStatus = Literal["locked", "available", "complete"]
 
@@ -169,3 +170,54 @@ def record_manual_checkin(
         db.rollback()
         return False
     return True
+
+
+class InvalidEventToken(Exception):
+    """The scanned QR is missing/tampered or points at no live event for this campus."""
+
+
+class DuplicateCheckIn(Exception):
+    """The student already has a check-in for this task/week."""
+
+
+def record_event_qr_checkin(
+    db: Session, *, campus_id: str, student_id: int, token: str
+) -> Task:
+    """Record an ``event_qr`` check-in from a scanned event QR (UC-3 core loop, US-8).
+
+    Validates that ``token`` is a well-signed event token whose task belongs to the
+    campus's active published challenge, then records exactly one check-in. Raises
+    ``InvalidEventToken`` for a bad/foreign token and ``DuplicateCheckIn`` when the
+    student already completed that task (race-safe via the unique constraint). Returns
+    the completed ``Task`` so the caller can surface the week number, title, and tip.
+
+    Deliberately applies no date-window or expiry gate yet (deferred with US-9), and
+    no enrollment gate — eligibility is the current-student check on the route.
+    """
+    task_id = verify_event_token(token)
+    if task_id is None:
+        raise InvalidEventToken
+
+    challenge = get_active_challenge_for_campus(db, campus_id)
+    if challenge is None:
+        raise InvalidEventToken
+
+    task = db.get(Task, task_id)
+    if task is None or task.challenge_id != challenge.id:
+        raise InvalidEventToken
+
+    existing = db.execute(
+        select(CheckIn).where(
+            CheckIn.student_id == student_id, CheckIn.task_id == task.id
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise DuplicateCheckIn
+
+    db.add(CheckIn(student_id=student_id, task_id=task.id, method="event_qr"))
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise DuplicateCheckIn from exc
+    return task

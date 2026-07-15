@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     jwt_ttl_seconds: int = 3600
     session_cookie: str = "wp_session"
 
+    # Event-QR signing (HS256), kept separate from the session secret so rotating
+    # one never invalidates the other. Tokens are static per task (no expiry yet —
+    # US-9 rotation is deferred). Override in any real deployment.
+    qr_secret: str = "dev-only-change-me-please-set-a-real-qr-32B+-secret"
+
     # SAML issuer -> campus_id. An unknown issuer is a failed auth, not a default.
     # Override via WP_CAMPUS_ISSUER_MAP as JSON (pydantic-settings decodes it).
     campus_issuer_map: dict[str, str] = {

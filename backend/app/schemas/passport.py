@@ -48,3 +48,22 @@ class CheckInRequest(BaseModel):
     """Body for a manual check-in: which week to complete."""
 
     weekNo: int
+
+
+class ScanCheckInRequest(BaseModel):
+    """Body for a QR check-in: the signed token decoded from the scanned event QR."""
+
+    token: str
+
+
+class CheckInResult(BaseModel):
+    """Result of a successful QR check-in: the refreshed passport plus the tip to show.
+
+    ``weekNo``/``title`` identify the week that just flipped to complete so the SPA can
+    celebrate it; ``tip`` is the personalized message shown after check-in (FR-E1).
+    """
+
+    passport: PassportOut
+    tip: str
+    weekNo: int
+    title: str

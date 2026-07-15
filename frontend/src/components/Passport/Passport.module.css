@@ -383,6 +383,65 @@
   cursor: default;
 }
 
+/* --- Scan-to-check-in CTA + scanner (US-8) --- */
+
+.scanCta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  margin-top: 16px;
+  padding: 0 24px;
+  border: none;
+  border-radius: 26px;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+}
+
+.scanCta:focus-visible {
+  outline: 3px solid var(--wp-on-primary);
+  outline-offset: -6px;
+}
+
+.qrRegion {
+  width: 100%;
+  min-height: 240px;
+  margin: 4px 0 8px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--wp-surface-container-high);
+}
+
+.qrRegion video {
+  width: 100% !important;
+  height: auto !important;
+  display: block;
+}
+
+.scanError {
+  margin: 4px 0 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--wp-error, #b3261e);
+}
+
+/* Post-check-in tip (FR-E1). */
+.tip {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--wp-outline-variant);
+  background: color-mix(in srgb, var(--wp-tertiary) 12%, var(--wp-surface-container));
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--wp-on-surface);
+}
+
 /* --- Sign out --- */
 
 .signoutBar {

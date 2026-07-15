@@ -5,10 +5,38 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import require_current_student
 from app.db import get_db
-from app.schemas.passport import CheckInRequest, PassportOut, WeekOut
-from app.services.passport import PassportView, build_passport, record_manual_checkin
+from app.schemas.passport import (
+    CheckInRequest,
+    CheckInResult,
+    PassportOut,
+    ScanCheckInRequest,
+    WeekOut,
+)
+from app.services.passport import (
+    DuplicateCheckIn,
+    InvalidEventToken,
+    PassportView,
+    build_passport,
+    record_event_qr_checkin,
+    record_manual_checkin,
+)
 
 router = APIRouter()
+
+INVALID_TOKEN_MESSAGE = "This code is no longer valid, ask the attendant"
+DUPLICATE_MESSAGE = "Already completed this week"
+
+
+def _event_qr_tip(title: str) -> str:
+    """A stand-in personalized tip shown after check-in (FR-E1).
+
+    Real per-task / AI-generated tips are Phase 2; this keeps the core loop honest by
+    always returning a friendly, task-named message.
+    """
+    return (
+        f"Nice work finishing {title}! Tip: try the 20-20-20 rule — every 20 minutes, "
+        "look at something 20 feet away for 20 seconds to rest your eyes."
+    )
 
 
 def _to_passport_out(view: PassportView) -> PassportOut:
@@ -58,6 +86,51 @@ def get_passport(
             status_code=status.HTTP_404_NOT_FOUND, detail="No active challenge"
         )
     return _to_passport_out(view)
+
+
+@router.post("/api/checkins/scan", response_model=CheckInResult)
+def scan_checkin(
+    payload: ScanCheckInRequest,
+    claims: dict = Depends(require_current_student),
+    db: Session = Depends(get_db),
+):
+    """Record an event-QR check-in from a scanned token — the UC-3 core loop (US-8).
+
+    The week flips to complete, the countdown updates, and a personalized tip is
+    returned (FR-D1/D2, FR-E1). Gated on current-student eligibility (US-2 / FR-A3):
+    a non-current student is 403 here (the "ineligible student" scenario). A tampered
+    or foreign token is 400; a repeat scan of a completed week is 409.
+    """
+    campus_id: str = claims["campus_id"]
+    student_id: int = claims["student_id"]
+    try:
+        task = record_event_qr_checkin(
+            db, campus_id=campus_id, student_id=student_id, token=payload.token
+        )
+    except InvalidEventToken as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=INVALID_TOKEN_MESSAGE
+        ) from exc
+    except DuplicateCheckIn as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=DUPLICATE_MESSAGE
+        ) from exc
+
+    week_no = task.position
+    title = task.title
+    view = build_passport(db, campus_id=campus_id, student_id=student_id)
+    if view is None:
+        # Unreachable in practice: the check-in only succeeds when an active
+        # challenge exists, but keep the read path total.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No active challenge"
+        )
+    return CheckInResult(
+        passport=_to_passport_out(view),
+        tip=_event_qr_tip(title),
+        weekNo=week_no,
+        title=title,
+    )
 
 
 @router.post("/api/checkins", response_model=PassportOut)

@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+
+from app.services.qr import mint_event_token
 
 # ---------------------------------------------------------------------------
 # Assessment item schemas (FR-B3)
@@ -132,6 +134,16 @@ class TaskOut(BaseModel):
     assessment_items: list[AssessmentItemOut] = []
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def qr_token(self) -> str:
+        """Static signed token the admin dashboard renders as the event QR (US-8).
+
+        Derived, never stored: the student scans this and POSTs it to
+        ``/api/checkins/scan`` to record an ``event_qr`` check-in.
+        """
+        return mint_event_token(self.id)
 
 
 class TaskReorder(BaseModel):

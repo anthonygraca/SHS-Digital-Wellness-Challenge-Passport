@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Passport, PassportView } from "./Passport";
-import type { Passport as PassportData, WeekStatus } from "../../types/passport";
+import { ApiError } from "../../api/challenges";
+import type {
+  CheckInResult,
+  Passport as PassportData,
+  WeekStatus,
+} from "../../types/passport";
 import type { Session } from "../../types/session";
 
 const sessionState = vi.hoisted(() => ({
@@ -16,6 +21,15 @@ vi.mock("../../auth/SessionProvider", () => ({
 }));
 vi.mock("react-router-dom", () => ({
   Navigate: ({ to }: { to: string }) => <div>redirect:{to}</div>,
+}));
+// Stub the camera scanner: render a button that decodes a fixed token on click,
+// so the scan flow is testable without a real camera / html5-qrcode.
+vi.mock("./QrScanner", () => ({
+  QrScanner: ({ onDecode }: { onDecode: (t: string) => void }) => (
+    <button type="button" onClick={() => onDecode("scanned-token")}>
+      simulate-scan
+    </button>
+  ),
 }));
 
 afterEach(() => {
@@ -249,5 +263,118 @@ describe("Passport eligibility gate (US-2 / FR-A3)", () => {
     sessionState.session = null;
     render(<Passport fetchData={vi.fn()} checkInFn={vi.fn()} />);
     expect(screen.getByText("redirect:/")).toBeInTheDocument();
+  });
+});
+
+describe("PassportView QR scan check-in (US-8)", () => {
+  function resultFrom(passport: PassportData, weekNo: number): CheckInResult {
+    return {
+      passport,
+      weekNo,
+      title: `Week ${weekNo} Portal`,
+      tip: "Take the stairs today — small wins add up.",
+    };
+  }
+
+  async function scan() {
+    await userEvent.click(
+      screen.getByRole("button", { name: /scan qr to check in/i }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /simulate-scan/i }));
+  }
+
+  it("shows the CTA only when a scan handler is provided", () => {
+    const { rerender } = render(<PassportView passport={passportWith(3)} />);
+    expect(
+      screen.queryByRole("button", { name: /scan qr to check in/i }),
+    ).toBeNull();
+
+    rerender(<PassportView passport={passportWith(3)} onScan={vi.fn()} />);
+    expect(
+      screen.getByRole("button", { name: /scan qr to check in/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("records a scan and shows the personalized tip on success", async () => {
+    const onScan = vi
+      .fn()
+      .mockResolvedValue(resultFrom(passportWith(4), 4));
+    render(<PassportView passport={passportWith(3)} onScan={onScan} />);
+
+    await scan();
+
+    expect(onScan).toHaveBeenCalledWith("scanned-token");
+    const sheet = await screen.findByRole("dialog", {
+      name: /check-in complete/i,
+    });
+    expect(within(sheet).getByText(/Week 4 Portal complete!/i)).toBeInTheDocument();
+    expect(
+      within(sheet).getByText(/take the stairs today/i),
+    ).toBeInTheDocument();
+  });
+
+  it("shows 'Already completed this week' when the scan is a duplicate (409)", async () => {
+    const onScan = vi
+      .fn()
+      .mockRejectedValue(new ApiError(409, "Already completed this week"));
+    render(<PassportView passport={passportWith(3)} onScan={onScan} />);
+
+    await scan();
+
+    const sheet = await screen.findByRole("dialog", { name: /check-in failed/i });
+    expect(
+      within(sheet).getByRole("alert"),
+    ).toHaveTextContent("Already completed this week");
+  });
+
+  it("shows the invalid-token message when the code is rejected (400)", async () => {
+    const onScan = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiError(400, "This code is no longer valid, ask the attendant"),
+      );
+    render(<PassportView passport={passportWith(3)} onScan={onScan} />);
+
+    await scan();
+
+    const sheet = await screen.findByRole("dialog", { name: /check-in failed/i });
+    expect(within(sheet).getByRole("alert")).toHaveTextContent(
+      /this code is no longer valid, ask the attendant/i,
+    );
+  });
+});
+
+describe("Passport container scan wiring (US-8)", () => {
+  it("refreshes the countdown after a successful scan", async () => {
+    sessionState.session = asSession({ isCurrentStudent: true });
+    const fetchData = vi.fn().mockResolvedValue(passportWith(3));
+    const scanCheckInFn = vi.fn().mockResolvedValue({
+      passport: passportWith(4),
+      weekNo: 4,
+      title: "Week 4 Portal",
+      tip: "Nice work!",
+    } satisfies CheckInResult);
+
+    render(
+      <Passport
+        fetchData={fetchData}
+        checkInFn={vi.fn()}
+        scanCheckInFn={scanCheckInFn}
+      />,
+    );
+
+    expect(
+      await screen.findByText(/3 of 7 complete, 4 remaining/i),
+    ).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /scan qr to check in/i }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /simulate-scan/i }));
+
+    expect(scanCheckInFn).toHaveBeenCalledWith("scanned-token");
+    expect(
+      await screen.findByText(/4 of 7 complete, 3 remaining/i),
+    ).toBeInTheDocument();
   });
 });
