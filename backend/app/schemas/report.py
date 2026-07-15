@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 from app.schemas.challenge import CheckInMethod
@@ -29,6 +31,27 @@ class WeekCompletionOut(BaseModel):
     title: str
     required: bool
     completed_count: int
+
+
+class PrizeEligibleRow(BaseModel):
+    """One student who has completed every required task (FR-F5 / US-26).
+
+    The one report that is deliberately per-student. FR-F6's "aggregate and
+    privacy-aware" rule governs the FR-F1 dashboard; a drawing list cannot be
+    aggregate by definition — it has to name who won a ticket. ``sso_subject``
+    is the only identifier available, because Student stores no name or campus
+    id on purpose (see models/student.py).
+
+    ``required_completed``/``required_total`` are exported alongside the subject
+    so a row can be audited without re-running the query: they are equal for
+    every exported row, and seeing that is the point.
+    """
+
+    student_id: int
+    sso_subject: str
+    required_completed: int
+    required_total: int
+    eligible_since: datetime
 
 
 class ParticipationReportOut(BaseModel):
