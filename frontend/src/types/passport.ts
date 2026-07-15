@@ -20,5 +20,10 @@ export interface Passport {
   totalWeeks: number;
   completedWeeks: number;
   remainingWeeks: number;
+  /** Required-task counts backing the prize-eligibility indicator (US-7). */
+  requiredTotal: number;
+  requiredCompleted: number;
+  /** Derived: true once every required task is complete. */
+  prizeEligible: boolean;
   weeks: PassportWeek[];
 }

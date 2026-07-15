@@ -4,7 +4,7 @@ import { useSession } from "../../auth/SessionProvider";
 import { EligibilityBlocked } from "../EligibilityBlocked/EligibilityBlocked";
 import { checkIn, fetchPassport } from "../../passport/passport";
 import type { Passport as PassportData, WeekStatus } from "../../types/passport";
-import { BoltIcon, CheckCircleIcon, LockIcon } from "../icons";
+import { BoltIcon, CheckCircleIcon, LockIcon, TrophyIcon } from "../icons";
 import styles from "./Passport.module.css";
 
 const STATUS_LABEL: Record<WeekStatus, string> = {
@@ -39,6 +39,43 @@ function formatWindow(
   return start ?? end ?? "Dates TBA";
 }
 
+/**
+ * Prize-eligibility indicator (US-7 / FR-C5). Eligibility is derived server-side
+ * from required-task completion; this just renders the status and the progress
+ * toward it so a student knows if they have met the drawing requirements.
+ */
+function PrizeIndicator({
+  eligible,
+  requiredCompleted,
+  requiredTotal,
+}: {
+  eligible: boolean;
+  requiredCompleted: number;
+  requiredTotal: number;
+}) {
+  const noun = `required task${requiredTotal === 1 ? "" : "s"}`;
+  const status = eligible ? "Prize eligible" : "Not yet eligible";
+  const detail = eligible
+    ? `All ${requiredTotal} ${noun} complete — you're in the drawing`
+    : `${requiredCompleted} of ${requiredTotal} ${noun} complete`;
+  return (
+    <div
+      className={styles.prize}
+      data-eligible={eligible}
+      role="status"
+      aria-label={`Prize eligibility: ${status}. ${detail}.`}
+    >
+      <span className={styles.prizeIcon} aria-hidden="true">
+        {eligible ? <TrophyIcon size={20} /> : <LockIcon size={18} />}
+      </span>
+      <span className={styles.prizeText}>
+        <span className={styles.prizeStatus}>{status}</span>
+        <span className={styles.prizeDetail}>{detail}</span>
+      </span>
+    </div>
+  );
+}
+
 type OnCheckIn = (weekNo: number) => Promise<void> | void;
 
 /** Presentational passport: progress countdown, week tiles, and a detail sheet. */
@@ -49,8 +86,16 @@ export function PassportView({
   passport: PassportData;
   onCheckIn?: OnCheckIn;
 }) {
-  const { challengeName, completedWeeks, totalWeeks, remainingWeeks, weeks } =
-    passport;
+  const {
+    challengeName,
+    completedWeeks,
+    totalWeeks,
+    remainingWeeks,
+    requiredCompleted,
+    requiredTotal,
+    prizeEligible,
+    weeks,
+  } = passport;
   const pct = totalWeeks > 0 ? (completedWeeks / totalWeeks) * 100 : 0;
 
   const [selectedWeekNo, setSelectedWeekNo] = useState<number | null>(null);
@@ -97,6 +142,11 @@ export function PassportView({
         >
           <div className={styles.progressFill} style={{ width: `${pct}%` }} />
         </div>
+        <PrizeIndicator
+          eligible={prizeEligible}
+          requiredCompleted={requiredCompleted}
+          requiredTotal={requiredTotal}
+        />
       </header>
 
       <ul className={styles.grid}>

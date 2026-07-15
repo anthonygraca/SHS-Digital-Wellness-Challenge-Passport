@@ -125,6 +125,9 @@ def test_passport_week_payload_is_camelcase(client, db_sessionmaker):
         "totalWeeks",
         "completedWeeks",
         "remainingWeeks",
+        "requiredTotal",
+        "requiredCompleted",
+        "prizeEligible",
         "weeks",
     }
     assert body["challengeName"] == "Stranger Things Wellness Challenge"

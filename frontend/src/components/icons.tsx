@@ -60,3 +60,18 @@ export function BoltIcon({ size = 20 }: { size?: number }) {
     </svg>
   );
 }
+
+export function TrophyIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M18 2H6v2H2v3a4 4 0 0 0 4 4h.35A6 6 0 0 0 11 14.92V18H8v2h8v-2h-3v-3.08A6 6 0 0 0 17.65 11H18a4 4 0 0 0 4-4V4h-4V2zM6 9a2 2 0 0 1-2-2V6h2v3zm14-2a2 2 0 0 1-2 2V6h2v1z" />
+    </svg>
+  );
+}

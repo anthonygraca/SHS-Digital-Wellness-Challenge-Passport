@@ -35,6 +35,9 @@ class PassportView:
     total_weeks: int
     completed_weeks: int
     remaining_weeks: int
+    required_total: int
+    required_completed: int
+    prize_eligible: bool
     weeks: list[WeekView]
 
 
@@ -101,12 +104,24 @@ def build_passport(
 
     completed = len(completed_ids)
     total = len(tasks)
+
+    # Prize eligibility (US-7 / FR-C5) is a *derived* query, never a stored flag:
+    # a student is eligible once every required task is complete. Optional tasks
+    # (``required`` False) are ignored. Guard on there being at least one required
+    # task so an all-optional challenge never reads as "eligible" for free.
+    required_total = sum(1 for t in tasks if t.required)
+    required_completed = sum(1 for t in tasks if t.required and t.id in completed_ids)
+    prize_eligible = required_total > 0 and required_completed == required_total
+
     return PassportView(
         challenge_name=challenge.name,
         theme=challenge.theme_id,
         total_weeks=total,
         completed_weeks=completed,
         remaining_weeks=total - completed,
+        required_total=required_total,
+        required_completed=required_completed,
+        prize_eligible=prize_eligible,
         weeks=weeks,
     )
 

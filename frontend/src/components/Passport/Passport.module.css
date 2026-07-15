@@ -55,6 +55,64 @@
   transition: width 0.3s ease;
 }
 
+/* --- Prize-eligibility indicator (US-7) --- */
+
+.prize {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--wp-outline-variant);
+  background: var(--wp-surface-container);
+}
+
+/* Eligible: lift it with the same "success" treatment as a complete week. */
+.prize[data-eligible="true"] {
+  border-color: var(--wp-tertiary);
+  background: color-mix(in srgb, var(--wp-tertiary) 16%, var(--wp-surface-container));
+}
+
+.prizeIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--wp-surface-container-high);
+  color: var(--wp-on-surface-variant);
+}
+
+.prize[data-eligible="true"] .prizeIcon {
+  background: var(--wp-tertiary);
+  color: var(--wp-surface);
+}
+
+.prizeText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.prizeStatus {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--wp-on-surface);
+}
+
+.prize[data-eligible="true"] .prizeStatus {
+  color: var(--wp-tertiary);
+}
+
+.prizeDetail {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--wp-on-surface-variant);
+}
+
 /* --- Week tiles --- */
 
 .grid {
