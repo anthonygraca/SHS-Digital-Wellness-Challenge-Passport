@@ -318,6 +318,38 @@ class CheckInOut(BaseModel):
     verified_by: str | None
 
 
+class AssessmentResponseOut(BaseModel):
+    """A student's scored response as the admin sees it (FR-E5).
+
+    No from_attributes, for the same reason as ``CheckInOut``: ``student_subject`` lives
+    on the Student row, so this is assembled explicitly.
+
+    ``student_id`` and ``student_subject`` are the only identifiers here because they
+    are the only ones that exist — ``Student`` carries no name and no campus ID number.
+    The schema is the privacy guarantee, and this surface adds nothing to it.
+    """
+
+    id: int
+    student_id: int
+    student_subject: str
+    response: str
+    score: float
+    scored_by: str
+    ai_feedback: str | None
+    ts: datetime
+
+
+class AssessmentScoreOverride(BaseModel):
+    """Set a response's score by hand (FR-E5). ``scored_by`` becomes "human".
+
+    Bounds are enforced here rather than in the service because this value comes from a
+    form: an admin who types 5 meant 0.5 or made a mistake, and either way a 422 naming
+    the range is more use than a silently clamped 1.0 skewing the FR-F4 mean.
+    """
+
+    score: float = Field(..., ge=0.0, le=1.0)
+
+
 class CheckInAuditOut(BaseModel):
     """One row of the append-only audit ledger (FR-D6)."""
 

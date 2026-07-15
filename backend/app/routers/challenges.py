@@ -13,6 +13,8 @@ from app.schemas.challenge import (
     AssessmentItemCreate,
     AssessmentItemOut,
     AssessmentItemUpdate,
+    AssessmentResponseOut,
+    AssessmentScoreOverride,
     ChallengeCreate,
     ChallengeDuplicate,
     ChallengeOut,
@@ -28,6 +30,7 @@ from app.schemas.challenge import (
     TaskReorder,
     TaskUpdate,
 )
+from app.services import assessments as assessment_svc
 from app.services import challenges as svc
 from app.services import checkins as checkin_svc
 from app.services import students as students_svc
@@ -499,3 +502,104 @@ def list_checkin_audits(
     if student_subject is not None:
         student_id = _get_student_or_404(db, campus_id, student_subject).id
     return checkin_svc.list_task_audits(db, task_id, student_id)
+
+
+# ---------------------------------------------------------------------------
+# Reflection scoring override (FR-E5)
+#
+# Nested under the challenge/task/item path rather than hung off /api/assessments so
+# that _get_challenge_or_404 -> _get_task_or_404 -> _get_item_or_404 supplies the campus
+# isolation for free. The student-side helper in services/assessments.py cannot serve an
+# admin: it is scoped to the *published* challenge, and an admin must be able to read and
+# fix scores on a draft.
+#
+# Deliberately no audit ledger, unlike the FR-D6 check-in override above. FR-D6 demands
+# one; FR-E5 asks only that scored_by become "human", and that field on the row is the
+# record. CheckInAudit is check-in-shaped and not reusable here, and a table nothing
+# requires is the same debt as a column nothing can write.
+# ---------------------------------------------------------------------------
+
+
+def _get_response_or_404(db: Session, item_id: int, response_id: int):
+    response = assessment_svc.get_item_response(db, item_id, response_id)
+    if response is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Response not found"
+        )
+    return response
+
+
+def _response_out(response, student: Student) -> AssessmentResponseOut:
+    """Assemble the response — student_subject lives on the Student row."""
+    return AssessmentResponseOut(
+        id=response.id,
+        student_id=response.student_id,
+        student_subject=student.sso_subject,
+        response=response.response,
+        score=response.score,
+        scored_by=response.scored_by,
+        ai_feedback=response.ai_feedback,
+        ts=response.ts,
+    )
+
+
+@router.get(
+    "/{challenge_id}/tasks/{task_id}/items/{item_id}/responses",
+    response_model=list[AssessmentResponseOut],
+)
+def list_item_responses(
+    challenge_id: int,
+    task_id: int,
+    item_id: int,
+    claims: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Every student response to one assessment item, newest first (FR-E5).
+
+    The reading surface for the score override: an admin cannot sensibly adjust a score
+    without seeing the reflection and the feedback it was given.
+    """
+    campus_id: str = claims["campus_id"]
+    _get_challenge_or_404(db, campus_id, challenge_id)
+    _get_task_or_404(db, challenge_id, task_id)
+    _get_item_or_404(db, task_id, item_id)
+
+    return [
+        _response_out(response, student)
+        for response, student in assessment_svc.list_item_responses(db, item_id)
+    ]
+
+
+@router.patch(
+    "/{challenge_id}/tasks/{task_id}/items/{item_id}/responses/{response_id}",
+    response_model=AssessmentResponseOut,
+)
+def override_response_score(
+    challenge_id: int,
+    task_id: int,
+    item_id: int,
+    response_id: int,
+    body: AssessmentScoreOverride,
+    claims: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Adjust a score by hand, marking it scored_by "human" (US-19 / FR-E5).
+
+    An UPDATE of the existing row, not a new one: the one-attempt constraint means there
+    is exactly one response per student per item, and the override is a correction to it
+    rather than a second opinion beside it.
+
+    Item-type-agnostic on purpose. FR-E5 motivates it for reflections, but nothing about
+    the operation is reflection-specific, and an admin repairing scores after a bad MCQ
+    answer key is a real need this already answers. Refusing that would need a reason the
+    requirement does not supply.
+    """
+    campus_id: str = claims["campus_id"]
+    _get_challenge_or_404(db, campus_id, challenge_id)
+    _get_task_or_404(db, challenge_id, task_id)
+    _get_item_or_404(db, task_id, item_id)
+    response = _get_response_or_404(db, item_id, response_id)
+    student = _get_student_or_404_by_id(db, campus_id, response.student_id)
+
+    updated = assessment_svc.override_response_score(db, response, body.score)
+    return _response_out(updated, student)
