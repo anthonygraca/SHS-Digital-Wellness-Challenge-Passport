@@ -413,14 +413,18 @@
   padding: 0;
 }
 
-/* The same three-rail shape as .contentRow, with a wider label rail again. These
-   labels are the widest on the dashboard and the only ones we do not write: an
-   admin authors the outcome tag (US-12), so unlike "Tips after scan" the string
-   cannot be trimmed until it fits. The rail is sized for a typical tag and the
-   label wraps rather than overflowing when one runs long — see .outcomeLabel. */
+/* The same three-rail shape as .contentRow, with the widest label rail on the
+   dashboard. These labels are the only ones we do not write: an admin authors the
+   outcome tag (US-12), so unlike "Tips after scan" the string cannot be trimmed
+   until it fits, and the rail has to go to the label instead.
+
+   120px is measured, not guessed: the seeded tags render "Know your numbers" and
+   "Stress management" at 115px, and a rail any narrower wraps the ordinary case
+   rather than the exceptional one. The value rail pays for it — it never holds
+   more than "100%". A tag longer than the rail still wraps; see .outcomeLabel. */
 .outcomeRow {
   display: grid;
-  grid-template-columns: 104px 1fr 44px;
+  grid-template-columns: 120px 1fr 40px;
   align-items: center;
   gap: 10px;
 }
