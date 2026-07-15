@@ -149,3 +149,73 @@ class EngagementReportOut(BaseModel):
     total_content_views: int
     content_views: list[ContentRefCountOut]
     guide_sessions: int
+
+
+class OutcomeScoreOut(BaseModel):
+    """How one learning outcome scored across the cohort (FR-F4 / US-24).
+
+    ``outcome_tag`` is a plain str, and deliberately not a Literal reused from
+    somewhere else — the trick MethodCountOut and ContentRefCountOut play, where
+    reusing the write path's vocabulary makes a fourth method or a third content
+    ref fail to validate here, cannot work for a vocabulary the admin authors.
+    An outcome tag is free text on AssessmentItem (US-12), so there is nothing to
+    reuse and no fixed set to check against: this report's buckets are whatever
+    the challenge's items are tagged with.
+
+    ``mean_score`` is the aggregate FR-F4 asks for, left as a raw 0.0..1.0 float.
+    Rendering it as "84%" is the client's job — the same division of labour that
+    keeps the auto *share* out of AttendanceReportOut.
+
+    ``mean_score`` is None, never 0.0, exactly when ``response_count`` is 0. A
+    tagged item nobody has answered has no mean, and 0.0 would claim the cohort
+    scored zero on it — a lie where None is a blank. The tag still appears: see
+    services/reports.py for why the query outer-joins to keep it.
+
+    ``response_count`` is what the mean was taken over, and it is not decoration.
+    A tag answered by two students and one answered by two hundred otherwise
+    render identically, and an admin acting on an 84% owes the difference.
+
+    ``human_scored_count`` is a structural 0 today — US-19's reflection override
+    is what writes scored_by="human" and it has not shipped. Reported rather than
+    omitted for the reason AttendanceReportOut reports ``staff: 0``: the zero says
+    the override path FR-F4 anticipates is not yet wired, and it makes "human
+    scores are included in the totals" readable off the report instead of a
+    promise the reader has to take on faith.
+    """
+
+    outcome_tag: str
+    mean_score: float | None
+    response_count: int
+    human_scored_count: int
+
+
+class LearningOutcomeReportOut(BaseModel):
+    """Mean assessment score per learning-outcome tag (FR-F4 / US-24).
+
+    The report that replaces hand-scoring: every score a student has earned,
+    grouped by the outcome its item is tagged to.
+
+    There is no OUTCOME_ORDER constant to seed the buckets from, unlike
+    METHOD_ORDER and CONTENT_REF_ORDER above. Those close over a vocabulary the
+    code owns; this one is admin-authored per challenge, so the fixed order the
+    other reports get from a module-level tuple comes from the query's ORDER BY
+    instead (alphabetical by tag — see services/reports.py).
+
+    ``total_responses`` and ``mean_score`` play the part ``total_checkins`` does:
+    shipped so the buckets have something to reconcile *against*, and counted
+    across every row rather than derived from the buckets. The total mean is
+    response-weighted — the mean of every score, not the mean of the per-tag
+    means, which differ whenever the tags have unequal counts. Weighting is the
+    honest one: it answers "how did the cohort do", where a mean of means would
+    let an outcome with three responses outvote one with three hundred.
+
+    Aggregate only, no per-student rows (FR-F6) — the scores are academic
+    performance, which is exactly what that rule exists to keep out of a
+    dashboard.
+    """
+
+    challenge: ReportChallengeOut
+    total_responses: int
+    mean_score: float | None
+    total_human_scored: int
+    outcomes: list[OutcomeScoreOut]

@@ -18,6 +18,7 @@ from app.schemas.enrollment import (
 from app.schemas.report import (
     AttendanceReportOut,
     EngagementReportOut,
+    LearningOutcomeReportOut,
     ParticipationReportOut,
 )
 from app.services import challenges as challenge_svc
@@ -57,7 +58,7 @@ def _report_challenge_or_404(
     authored, and its counts would describe a challenge no student could join.
 
     Still shared by every route in this file, and now more load-bearing than
-    before: it is why one selector moves all four answers at once, so two cards on
+    before: it is why one selector moves all five answers at once, so two cards on
     one dashboard can never disagree about which challenge they describe.
     """
     if challenge_id is None:
@@ -156,6 +157,28 @@ def engagement_report(
     on one dashboard always describe the same challenge.
     """
     return report_svc.engagement_report(
+        db, _report_challenge_or_404(db, claims, challenge_id)
+    )
+
+
+@router.get("/outcomes", response_model=LearningOutcomeReportOut)
+def learning_outcome_report(
+    challenge_id: int | None = Query(None),
+    claims: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Mean assessment score per learning-outcome tag (FR-F4 / US-24).
+
+    Its own route for the reason /attendance and /engagement are: a fourth grain —
+    how well students scored, rather than weeks finished, check-ins captured, or
+    content looked at — and one grain per response keeps each readable as one FR.
+
+    US-24's Gherkin never asks for ``challenge_id``; it lands here anyway, like on
+    every route in this file, so the dashboard's cards always describe the same
+    challenge. A per-outcome mean is also the number most worth comparing across
+    semesters, which is the thing an id makes possible at all.
+    """
+    return report_svc.learning_outcome_report(
         db, _report_challenge_or_404(db, claims, challenge_id)
     )
 

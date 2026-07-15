@@ -36,6 +36,7 @@ markers = [
     "FR_F1: participation & completion funnel report",
     "FR_F2: auto-vs-manual attendance report",
     "FR_F3: engagement report — content views + guide usage",
+    "FR_F4: learning-outcome aggregate — mean score by outcome tag",
     "FR_F5: prize-eligible CSV export",
     "audit: writes or asserts the audit trail",
     "source_UC_5: traces to use case UC-5",
