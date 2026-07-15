@@ -13,6 +13,17 @@ class Settings(BaseSettings):
     # Which identity provider to use. "mock" (default, demo) or "saml" (real campus IdP).
     auth_provider: str = "mock"
 
+    # Build provenance, surfaced at GET /api/version and on the sign-in screen so
+    # "which commit is actually deployed?" is answerable from the app rather than
+    # from ECR. scripts/deploy/release.sh stamps these into the image at build time
+    # from the same git SHA it tags the image with, so the two cannot disagree.
+    #
+    # "unknown" is the honest default: a plain `docker build` or a local `uvicorn`
+    # passes no build args, and claiming a version there would be a lie. Anything
+    # reading these must treat "unknown" as a real, expected value.
+    git_sha: str = "unknown"
+    built_at: str = "unknown"
+
     # Persistence. SQLite on disk for local dev/demo.
     database_url: str = "sqlite:///./wellness_passport.db"
 

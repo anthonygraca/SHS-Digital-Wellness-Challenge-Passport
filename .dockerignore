@@ -1,0 +1,38 @@
+# Keep the build context small and the image clean. Anything not needed to build
+# the SPA or run the API stays out.
+
+.git
+.github
+docs
+scripts
+.claude
+
+# Python
+backend/.venv
+backend/**/__pycache__
+backend/**/*.pyc
+backend/.pytest_cache
+backend/.ruff_cache
+backend/**/*.egg-info
+backend/tests
+
+# The local dev database. Never bake developer data into an image — the runtime
+# reads its DB from the /data volume instead.
+backend/*.db
+
+# Secrets. .deploy-local/env holds real account ids and the deployment's signing
+# secrets; nothing in the Dockerfile copies it today, but keeping it out of the
+# build context means a future COPY cannot leak it. **/.env covers a local .env
+# if someone adds one — note it does NOT match .deploy-local/env, which is why
+# that path is listed separately.
+.deploy-local
+**/.env
+
+# Node: npm ci rebuilds these from the lockfile inside the image, and a host
+# node_modules would be both huge and possibly wrong-platform.
+frontend/node_modules
+frontend/dist
+frontend/coverage
+frontend/**/*.tsbuildinfo
+
+**/.DS_Store

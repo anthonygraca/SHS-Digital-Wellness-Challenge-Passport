@@ -1,0 +1,43 @@
+# Single-service stack: one container serving both the SPA and the API on one
+# origin. Used both for local verification (`docker compose up --build`) and on
+# the EC2 host.
+
+services:
+  app:
+    build:
+      context: .
+    image: wellness-passport:latest
+    restart: unless-stopped
+    ports:
+      # Host 80 -> container 8000, so the app answers on a bare http://<host>/
+      # with no port in the URL. Change to "8000:8000" to run it alongside
+      # something else that already owns 80.
+      - "80:8000"
+    volumes:
+      # Named volume, so `docker compose down` / a rebuild / an instance reboot
+      # all keep the SQLite database. `down -v` is what deletes it.
+      - wp-data:/data
+    environment:
+      # ---------------------------------------------------------------------
+      # TESTING CONFIGURATION — NOT SAFE TO EXPOSE PUBLICLY.
+      #
+      # WP_AUTH_PROVIDER=mock serves the fake IdP at /mock-idp/login, which will
+      # mint a session for any identity the form is given, including
+      # affiliation=staff (admin). The two secrets below are the checked-in dev
+      # defaults from backend/app/config.py, so any session cookie this issues is
+      # forgeable by anyone with the repo.
+      #
+      # This is deliberate for now; the EC2 security group is what keeps it
+      # private. To close it up: set real secrets here (or in an env_file), and
+      # note that WP_AUTH_PROVIDER=saml additionally needs the SamlProvider
+      # settings stub in backend/app/auth/registry.py filled in first.
+      # ---------------------------------------------------------------------
+      WP_AUTH_PROVIDER: "mock"
+      WP_JWT_SECRET: "dev-only-change-me-please-set-a-real-32B+-secret"
+      WP_QR_SECRET: "dev-only-change-me-please-set-a-real-qr-32B+-secret"
+      # Absolute path into the mounted volume. The image sets this too; repeated
+      # here so the persistence story is visible in one place.
+      WP_DATABASE_URL: "sqlite:////data/wellness_passport.db"
+
+volumes:
+  wp-data:

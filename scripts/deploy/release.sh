@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Build the image, push it to ECR, and roll the running instance onto it.
+#
+# Run from the repo root on the commit you want to ship.
+
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+cd "$REPO_ROOT"
+
+[[ "$(instance_state)" == "running" ]] || die "instance is not running. Run scripts/deploy/up.sh first."
+
+SHA="$(git rev-parse --short HEAD)"
+DIRTY=""
+git diff --quiet && git diff --cached --quiet || DIRTY="-dirty"
+TAG="${SHA}${DIRTY}"
+
+say "Building wellness-passport:${TAG}"
+# The same TAG is stamped into the image and used as its ECR tag, so what
+# /api/version reports and what the registry calls it cannot drift apart.
+docker build \
+  --build-arg "WP_GIT_SHA=${TAG}" \
+  --build-arg "WP_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -t "wellness-passport:${TAG}" .
+
+say "Pushing to ECR"
+ecr_login
+# Tag by SHA so a deployed version is traceable back to a commit, and move
+# :latest to match so the instance's compose file needs no edit.
+docker tag "wellness-passport:${TAG}" "${ECR_REPO}:${TAG}"
+docker tag "wellness-passport:${TAG}" "${ECR_REPO}:latest"
+docker push "${ECR_REPO}:${TAG}"
+docker push "${ECR_REPO}:latest"
+
+say "Rolling the instance"
+cmd_id="$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+  --document-name AWS-RunShellScript \
+  --comment "deploy ${TAG}" \
+  --parameters 'commands=["cd /opt/wellness-passport","aws ecr get-login-password --region '"$AWS_REGION"' | docker login --username AWS --password-stdin '"$ECR_REGISTRY"'","docker compose pull","docker compose up -d","docker image prune -f"]' \
+  --query 'Command.CommandId' --output text)"
+
+for _ in $(seq 1 40); do
+  status="$(aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" \
+    --query 'Status' --output text 2>/dev/null || echo Pending)"
+  [[ "$status" == "InProgress" || "$status" == "Pending" ]] || break
+  sleep 3
+done
+
+if [[ "$status" != "Success" ]]; then
+  aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" \
+    --query '[Status,StandardErrorContent]' --output text
+  die "rollout failed (status: $status)"
+fi
+
+host="$(app_host)"
+say "Verifying"
+wait_for_healthz "$host" 24 || die "deployed, but /healthz never answered. See scripts/deploy/logs.sh"
+
+# The SPA is served by the same origin as the API. If the mount is missing, / returns
+# JSON or a 404 instead of the app shell — catch that here rather than in a demo.
+ctype="$(curl -s -o /dev/null -w '%{content_type}' --max-time 6 "http://${host}/")"
+[[ "$ctype" == text/html* ]] || die "/ returned '${ctype}', not HTML — the SPA mount is missing from app/main.py"
+
+# "The rollout succeeded" and "the new code is running" are different claims. The
+# SSM command exits 0 if compose ran, even when it recreated nothing: a pull that
+# silently kept a cached :latest, or a container that never restarted, both look
+# like success from here. Ask the app which commit it is instead of assuming.
+deployed="$(curl -s --max-time 6 "http://${host}/api/version" \
+  | sed -n 's/.*"gitSha":"\([^"]*\)".*/\1/p')"
+[[ "$deployed" == "$TAG" ]] || die "rolled out ${TAG}, but /api/version reports '${deployed:-<nothing>}' — the old container is probably still serving. Check: scripts/deploy/logs.sh"
+
+say "Released ${TAG}  ->  http://${host}/"
+info "/api/version confirms ${deployed} is serving"
