@@ -1,0 +1,188 @@
+/* Reporting dashboard (FR-F1 / US-21) — screen A1 of the design prototype:
+   an enrolled-count tile above a per-week completion funnel of horizontal bars.
+   Mobile-first: the prototype's desktop columns become one stacked column on a
+   phone, with the funnel card full width at every size. */
+
+.page {
+  min-height: 100dvh;
+  background: var(--wp-surface);
+  color: var(--wp-on-surface);
+  padding: 0 0 64px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--wp-surface-container);
+  border-bottom: 1px solid var(--wp-outline-variant);
+  gap: 12px;
+}
+
+.backBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 4px 8px 4px 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--wp-on-surface-variant);
+  font-size: 14px;
+  cursor: pointer;
+}
+.backBtn:hover { background: color-mix(in srgb, var(--wp-on-surface) 8%, transparent); }
+.backBtn:focus-visible { outline: 2px solid var(--wp-primary); }
+
+.refreshBtn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 20px;
+  border: none;
+  border-radius: 22px;
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.refreshBtn:hover { background: color-mix(in srgb, var(--wp-primary) 88%, black); }
+.refreshBtn:focus-visible { outline: 3px solid var(--wp-primary); outline-offset: 2px; }
+
+.content {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.eyebrow {
+  font-family: var(--wp-font-display);
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--wp-on-surface-variant);
+  margin: 0 0 2px;
+}
+
+.title {
+  font-family: var(--wp-font-display);
+  font-size: 30px;
+  font-weight: 700;
+  margin: 0 0 24px;
+}
+
+.cardLabel {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 16px;
+}
+
+/* ── Enrolled tile ────────────────────────────────────────────── */
+.statCard {
+  background: var(--wp-surface-container);
+  border-radius: 20px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
+.statIcon {
+  display: flex;
+  color: var(--wp-primary);
+}
+
+.statValue {
+  font-family: var(--wp-font-display);
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1;
+  margin: 8px 0 0;
+}
+
+.statLabel {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--wp-on-surface-variant);
+  margin: 4px 0 0;
+}
+
+/* ── Completion funnel ────────────────────────────────────────── */
+.funnelCard {
+  background: var(--wp-surface-container);
+  border-radius: 20px;
+  padding: 20px;
+}
+
+.funnel {
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+}
+
+/* Fixed rails either side of a fluid track: the week labels and the counts stay
+   aligned down the column, so the bars are comparable at a glance. */
+.funnelRow {
+  display: grid;
+  grid-template-columns: 52px 1fr 78px;
+  align-items: center;
+  gap: 10px;
+}
+
+.weekLabel {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+}
+
+.track {
+  height: 22px;
+  border-radius: 6px;
+  background: var(--wp-surface-container-high);
+  overflow: hidden;
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--wp-primary);
+  /* A week at 0% still shows a sliver, so the row reads as an empty bar
+     rather than as a missing one. */
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill { transition: none; }
+}
+
+.value {
+  text-align: right;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.funnelEmpty {
+  font-size: 13px;
+  color: var(--wp-on-surface-variant);
+  margin: 0;
+}
+
+/* ── States ───────────────────────────────────────────────────── */
+.empty {
+  text-align: center;
+  color: var(--wp-on-surface-variant);
+  padding: 40px 0;
+  font-size: 15px;
+}
+
+.error {
+  color: var(--wp-error);
+  font-size: 13px;
+  margin: 0 0 12px;
+}

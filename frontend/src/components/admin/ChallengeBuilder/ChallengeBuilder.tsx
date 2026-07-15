@@ -1394,6 +1394,7 @@ function AssessmentItemFormModal({
 
 export function ChallengeBuilder() {
   const { session, signOut } = useSession();
+  const navigate = useNavigate();
   const [view, setView] = useState<View>({ kind: "list" });
 
   return (
@@ -1406,6 +1407,13 @@ export function ChallengeBuilder() {
               {session.affiliation}
             </span>
           )}
+          <button
+            type="button"
+            className={styles.btnSecondary}
+            onClick={() => navigate("/admin/reports")}
+          >
+            Reports
+          </button>
           <button
             type="button"
             className={styles.btnSecondary}

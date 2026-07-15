@@ -9,6 +9,7 @@ import { Passport } from "./components/Passport/Passport";
 import { AuthCallback } from "./components/AuthCallback/AuthCallback";
 import { ChallengeBuilder } from "./components/admin/ChallengeBuilder/ChallengeBuilder";
 import { LiveOps } from "./components/admin/LiveOps/LiveOps";
+import { Reports } from "./components/admin/Reports/Reports";
 
 /** Sign-in route: if already authenticated, skip straight to the passport. */
 function SignInRoute() {
@@ -42,6 +43,14 @@ export function App() {
               element={
                 <AdminRoute>
                   <ChallengeBuilder />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/reports"
+              element={
+                <AdminRoute>
+                  <Reports />
                 </AdminRoute>
               }
             />
