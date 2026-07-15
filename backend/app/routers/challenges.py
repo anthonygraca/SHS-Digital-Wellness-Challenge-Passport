@@ -12,6 +12,7 @@ from app.schemas.challenge import (
     AssessmentItemOut,
     AssessmentItemUpdate,
     ChallengeCreate,
+    ChallengeDuplicate,
     ChallengeOut,
     ChallengeSummary,
     ChallengeUpdate,
@@ -110,6 +111,35 @@ def publish_challenge(
             detail="Challenge is already published",
         )
     return svc.publish_challenge(db, challenge)
+
+
+@router.post(
+    "/{challenge_id}/duplicate",
+    response_model=ChallengeOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def duplicate_challenge(
+    challenge_id: int,
+    body: ChallengeDuplicate | None = None,
+    claims: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Duplicate a challenge as a new editable draft (FR-B6).
+
+    The original may be draft or published; the copy is always a draft. The body
+    is optional — omitted, the copy takes a derived "<name> (Copy)" and the
+    original's semester.
+    """
+    campus_id: str = claims["campus_id"]
+    original = _get_challenge_or_404(db, campus_id, challenge_id)
+    try:
+        return svc.duplicate_challenge(
+            db, campus_id, original, body or ChallengeDuplicate()
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
