@@ -6,6 +6,77 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.challenge import Challenge, Task
+from app.models.theme import Theme
+
+# The re-skin presets (US-13 / FR-B4). Palettes mirror the [data-theme] token
+# blocks in frontend/src/theme/tokens.css, which stay in place as the static
+# fallback; these rows are what makes a theme *editable* without a deploy (NFR-6).
+_SEED_THEMES: list[dict] = [
+    {
+        "id": "stranger-things",
+        "name": "Stranger Things",
+        "palette": {
+            "primary": "#ff4438",
+            "on-primary": "#ffffff",
+            "primary-container": "#7f1710",
+            "on-primary-container": "#ffdad4",
+            "secondary": "#e7bdb6",
+            "on-secondary": "#442925",
+            "tertiary": "#e5c38d",
+            "surface": "#12100f",
+            "surface-container": "#201a19",
+            "surface-container-high": "#2b2321",
+            "on-surface": "#f1dedb",
+            "on-surface-variant": "#d8c2be",
+            "outline": "#a08c88",
+            "outline-variant": "#534340",
+            "error": "#ffb4ab",
+            "on-error": "#690005",
+            "error-container": "#93000a",
+            "on-error-container": "#ffdad6",
+            "hero-a": "#4a0f0a",
+            "hero-b": "#12100f",
+            "font-display": '"Oswald", system-ui, sans-serif',
+        },
+        "logo_url": None,
+        "hero_url": None,
+        "app_title": "Wellness Passport",
+        "tagline": "Step through the first portal — survival starts with protection.",
+        "copy_tone": "dark, retro-80s, ominous",
+    },
+    {
+        "id": "harry-potter",
+        "name": "Harry Potter",
+        "palette": {
+            "primary": "#7d2e2e",
+            "on-primary": "#ffffff",
+            "primary-container": "#ffdad5",
+            "on-primary-container": "#410004",
+            "secondary": "#b8860b",
+            "on-secondary": "#ffffff",
+            "tertiary": "#4b5320",
+            "surface": "#f5ecd8",
+            "surface-container": "#eee2c9",
+            "surface-container-high": "#e7d9ba",
+            "on-surface": "#23190b",
+            "on-surface-variant": "#4f4536",
+            "outline": "#817567",
+            "outline-variant": "#d3c4ad",
+            "error": "#b3261e",
+            "on-error": "#ffffff",
+            "error-container": "#f9dedc",
+            "on-error-container": "#410e0b",
+            "hero-a": "#7d2e2e",
+            "hero-b": "#b8860b",
+            "font-display": '"Cinzel", Georgia, serif',
+        },
+        "logo_url": None,
+        "hero_url": None,
+        "app_title": "Wellness Passport",
+        "tagline": "Solemnly swear to look after your wellbeing.",
+        "copy_tone": "whimsical, wizarding, parchment",
+    },
+]
 
 # The real "Stranger Things" 7-week challenge (docs/frontend-design-prompt.md:28-33).
 # Phase 1 seeds this so the passport (US-5) has real data before the admin builder
@@ -99,6 +170,18 @@ _DEMO_WEEKS: list[dict] = [
         "required": True,
     },
 ]
+
+
+def seed_themes(db: Session) -> None:
+    """Idempotently seed the re-skin presets (US-13).
+
+    Existing rows are never overwritten: once an admin has edited a theme's
+    palette or copy, those edits must survive app restarts.
+    """
+    for row in _SEED_THEMES:
+        if db.get(Theme, row["id"]) is None:
+            db.add(Theme(**row))
+    db.commit()
 
 
 def seed_demo_challenge(db: Session) -> Challenge | None:

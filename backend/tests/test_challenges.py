@@ -117,6 +117,54 @@ class TestCreateChallenge:
 
 
 # ---------------------------------------------------------------------------
+# FR-B4 — Theme selection (Gherkin: "Apply a theme to the student app")
+# ---------------------------------------------------------------------------
+
+
+class TestChallengeTheme:
+    def test_theme_defaults_to_empty(self, client):
+        _sign_in_as(client, "staff")
+        assert _create_challenge(client).json()["theme_id"] == ""
+
+    def test_create_with_theme_round_trips(self, client):
+        _sign_in_as(client, "staff")
+        resp = _create_challenge(client, theme_id="stranger-things")
+
+        assert resp.status_code == 201
+        assert resp.json()["theme_id"] == "stranger-things"
+        # ...and on the list view the builder renders from.
+        assert client.get("/api/challenges").json()[0]["theme_id"] == "stranger-things"
+
+    def test_switching_theme_is_a_config_change(self, client):
+        """Re-skin without a code change (NFR-6): swap the theme via PATCH alone."""
+        _sign_in_as(client, "staff")
+        challenge_id = _create_challenge(client, theme_id="stranger-things").json()["id"]
+        client.post(f"/api/challenges/{challenge_id}/publish")
+
+        resp = client.patch(
+            f"/api/challenges/{challenge_id}", json={"theme_id": "harry-potter"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["theme_id"] == "harry-potter"
+        assert resp.json()["status"] == "published"
+
+    def test_theme_can_be_reset_to_default(self, client):
+        _sign_in_as(client, "staff")
+        challenge_id = _create_challenge(client, theme_id="stranger-things").json()["id"]
+
+        resp = client.patch(f"/api/challenges/{challenge_id}", json={"theme_id": ""})
+        assert resp.status_code == 200
+        assert resp.json()["theme_id"] == ""
+
+    def test_omitting_theme_on_update_leaves_it_alone(self, client):
+        _sign_in_as(client, "staff")
+        challenge_id = _create_challenge(client, theme_id="stranger-things").json()["id"]
+
+        resp = client.patch(f"/api/challenges/{challenge_id}", json={"name": "Renamed"})
+        assert resp.json()["theme_id"] == "stranger-things"
+
+
+# ---------------------------------------------------------------------------
 # Publish (Gherkin: "Publish a challenge")
 # ---------------------------------------------------------------------------
 

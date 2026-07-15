@@ -9,6 +9,8 @@ import type {
   Passport as PassportData,
   WeekStatus,
 } from "../../types/passport";
+import { useTheme } from "../../theme/ThemeProvider";
+import { resolveThemeCopy } from "../../theme/themes";
 import { BoltIcon, CheckCircleIcon, LockIcon, TrophyIcon } from "../icons";
 import { QrScanner } from "./QrScanner";
 import styles from "./Passport.module.css";
@@ -97,6 +99,8 @@ export function PassportView({
 }) {
   const {
     challengeName,
+    theme: themeId,
+    themeConfig: theme,
     completedWeeks,
     totalWeeks,
     remainingWeeks,
@@ -106,6 +110,23 @@ export function PassportView({
     weeks,
   } = passport;
   const pct = totalWeeks > 0 ? (completedWeeks / totalWeeks) * 100 : 0;
+
+  // Themed branding and copy (US-13), read straight off the passport. The palette
+  // is applied separately by ThemeProvider as CSS custom properties, so every
+  // style below keeps working through a re-skin untouched.
+  const { appTitle, tagline } = resolveThemeCopy(themeId, theme);
+  // Hero art sits behind a scrim of the theme's own surface color, so the header
+  // text keeps the contrast it was designed for whatever image an admin picks
+  // (and whether the theme is light or dark). No art = the plain surface.
+  const heroStyle = theme?.heroUrl
+    ? {
+        backgroundImage:
+          `linear-gradient(160deg, color-mix(in srgb, var(--wp-surface) 80%, transparent), ` +
+          `color-mix(in srgb, var(--wp-surface) 94%, transparent)), url(${theme.heroUrl})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }
+    : undefined;
 
   const [selectedWeekNo, setSelectedWeekNo] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -162,11 +183,18 @@ export function PassportView({
 
   return (
     <main className={styles.screen}>
-      <header className={styles.header}>
+      <header className={styles.header} style={heroStyle}>
+        <div className={styles.brand}>
+          {theme?.logoUrl && (
+            <img className={styles.logo} src={theme.logoUrl} alt="" />
+          )}
+          <span className={styles.appTitle}>{appTitle}</span>
+        </div>
         <p className={styles.eyebrow}>{challengeName}</p>
         <h1 className={styles.countdown}>
           {completedWeeks} of {totalWeeks} complete, {remainingWeeks} remaining
         </h1>
+        {tagline && <p className={styles.tagline}>{tagline}</p>}
         <div
           className={styles.progressTrack}
           role="progressbar"
@@ -353,6 +381,7 @@ export function Passport({
   const { session, loading, signOut } = useSession();
   const [passport, setPassport] = useState<PassportData | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
+  const { applyTheme } = useTheme();
 
   useEffect(() => {
     if (!session || !session.isCurrentStudent) return;
@@ -366,6 +395,13 @@ export function Passport({
       active = false;
     };
   }, [session, fetchData]);
+
+  // The challenge's theme rides along on every passport response, so re-skinning
+  // on a theme change (US-13) costs nothing but this hand-off — and a check-in or
+  // scan refresh re-applies it for free.
+  useEffect(() => {
+    if (passport) applyTheme(passport.theme, passport.themeConfig);
+  }, [passport, applyTheme]);
 
   async function handleCheckIn(weekNo: number) {
     const updated = await checkInFn(weekNo);

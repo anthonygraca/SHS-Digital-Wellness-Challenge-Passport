@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useSession } from "../../../auth/SessionProvider";
 import * as api from "../../../api/challenges";
+import * as themeApi from "../../../api/themes";
 import type {
   AssessmentItem,
   Challenge,
   ChallengeSummary,
   Task,
 } from "../../../types/challenge";
+import type { Theme } from "../../../types/theme";
 import styles from "./ChallengeBuilder.module.css";
 
 // ---------------------------------------------------------------------------
@@ -123,6 +125,8 @@ function ChallengeDetail({
   const [addingTask, setAddingTask] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [itemsTask, setItemsTask] = useState<Task | null>(null);
+  const [editingTheme, setEditingTheme] = useState(false);
+  const [themes, setThemes] = useState<Theme[]>([]);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -136,6 +140,17 @@ function ChallengeDetail({
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Only for naming the applied theme; a failed lookup falls back to its id.
+  const refreshThemes = useCallback(
+    () => themeApi.listThemes().then(setThemes).catch(() => setThemes([])),
+    [],
+  );
+
+  useEffect(() => { void refreshThemes(); }, [refreshThemes]);
+
+  const themeName =
+    themes.find((t) => t.id === challenge?.theme_id)?.name ?? challenge?.theme_id;
 
   async function handlePublish() {
     if (!challenge) return;
@@ -178,6 +193,9 @@ function ChallengeDetail({
             <span>{challenge.semester}</span>
             <span>{fmtDate(challenge.start_date)} – {fmtDate(challenge.end_date)}</span>
             <StatusBadge status={challenge.status} />
+            <span className={styles.themeBadge}>
+              Theme: {challenge.theme_id ? themeName : "Default"}
+            </span>
           </div>
           {error && <p className={styles.error}>{error}</p>}
           <div className={styles.detailActions}>
@@ -188,6 +206,15 @@ function ChallengeDetail({
             >
               Edit details
             </button>
+            {challenge.theme_id && (
+              <button
+                type="button"
+                className={styles.btnSecondary}
+                onClick={() => setEditingTheme(true)}
+              >
+                Edit theme
+              </button>
+            )}
             {challenge.status === "draft" && (
               <button
                 type="button"
@@ -253,6 +280,14 @@ function ChallengeDetail({
           challengeId={challenge.id}
           task={itemsTask}
           onClose={() => { setItemsTask(null); void load(); }}
+        />
+      )}
+
+      {editingTheme && challenge.theme_id && (
+        <ThemeEditorModal
+          themeId={challenge.theme_id}
+          onClose={() => setEditingTheme(false)}
+          onSaved={() => { setEditingTheme(false); void refreshThemes(); }}
         />
       )}
     </>
@@ -406,6 +441,173 @@ function TaskList({
 }
 
 // ---------------------------------------------------------------------------
+// Theme editor modal (US-13 / FR-B4)
+// ---------------------------------------------------------------------------
+
+// The palette holds ~20 tokens; these are the ones worth a color picker. The rest
+// (the on-* contrast pairs especially) stay as authored and remain editable via
+// the API, so tuning them is still config rather than code (NFR-6).
+const EDITABLE_COLORS: { key: string; label: string }[] = [
+  { key: "primary", label: "Primary" },
+  { key: "secondary", label: "Secondary" },
+  { key: "hero-a", label: "Hero top" },
+  { key: "hero-b", label: "Hero bottom" },
+];
+
+function ThemeEditorModal({
+  themeId,
+  onClose,
+  onSaved,
+}: {
+  themeId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [theme, setTheme] = useState<Theme | null>(null);
+  const [colors, setColors] = useState<Record<string, string>>({});
+  const [appTitle, setAppTitle] = useState("");
+  const [tagline, setTagline] = useState("");
+  const [copyTone, setCopyTone] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [heroUrl, setHeroUrl] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    void themeApi
+      .getTheme(themeId)
+      .then((t) => {
+        setTheme(t);
+        setColors(
+          Object.fromEntries(
+            EDITABLE_COLORS.map(({ key }) => [key, t.palette[key] ?? "#000000"]),
+          ),
+        );
+        setAppTitle(t.app_title);
+        setTagline(t.tagline);
+        setCopyTone(t.copy_tone);
+        setLogoUrl(t.logo_url ?? "");
+        setHeroUrl(t.hero_url ?? "");
+      })
+      .catch((e) =>
+        setError(e instanceof api.ApiError ? e.message : "Could not load theme"),
+      );
+  }, [themeId]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!theme) return;
+    setError(null);
+    setSaving(true);
+    try {
+      // Merge into the fetched palette: the API replaces the map wholesale, so
+      // sending only the edited keys would drop every token not shown here.
+      await themeApi.updateTheme(theme.id, {
+        palette: { ...theme.palette, ...colors },
+        app_title: appTitle,
+        tagline,
+        copy_tone: copyTone,
+        logo_url: logoUrl || null,
+        hero_url: heroUrl || null,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Theme editor">
+      <div className={`${styles.modal} ${styles.modalWide}`}>
+        <h2>Edit theme{theme ? `: ${theme.name}` : ""}</h2>
+        {error && <p className={styles.error}>{error}</p>}
+        {!theme ? (
+          <p className={styles.empty}>Loading…</p>
+        ) : (
+          <form onSubmit={(e) => void handleSubmit(e)}>
+            <div className={styles.colorGrid}>
+              {EDITABLE_COLORS.map(({ key, label }) => (
+                <div key={key} className={styles.colorField}>
+                  <label htmlFor={`te-${key}`}>{label}</label>
+                  <input
+                    id={`te-${key}`}
+                    type="color"
+                    value={colors[key] ?? "#000000"}
+                    onChange={(e) =>
+                      setColors((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+            <div className={styles.fieldGroup}>
+              <label htmlFor="te-app-title">App title</label>
+              <input
+                id="te-app-title"
+                type="text"
+                value={appTitle}
+                onChange={(e) => setAppTitle(e.target.value)}
+                required
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label htmlFor="te-tagline">Tagline</label>
+              <textarea
+                id="te-tagline"
+                rows={2}
+                value={tagline}
+                onChange={(e) => setTagline(e.target.value)}
+                placeholder="Shown to students under the countdown"
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label htmlFor="te-copy-tone">Copy tone</label>
+              <input
+                id="te-copy-tone"
+                type="text"
+                value={copyTone}
+                onChange={(e) => setCopyTone(e.target.value)}
+                placeholder="e.g. dark, retro-80s, ominous"
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label htmlFor="te-logo-url">Logo URL</label>
+              <input
+                id="te-logo-url"
+                type="url"
+                value={logoUrl}
+                onChange={(e) => setLogoUrl(e.target.value)}
+                placeholder="https://…  (optional)"
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label htmlFor="te-hero-url">Hero art URL</label>
+              <input
+                id="te-hero-url"
+                type="url"
+                value={heroUrl}
+                onChange={(e) => setHeroUrl(e.target.value)}
+                placeholder="https://…  (optional)"
+              />
+            </div>
+            <div className={styles.formActions}>
+              <button type="button" className={styles.btnSecondary} onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className={styles.btnPrimary} disabled={saving}>
+                {saving ? "Saving…" : "Save theme"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Challenge create / edit modal
 // ---------------------------------------------------------------------------
 
@@ -422,8 +624,16 @@ function ChallengeFormModal({
   const [semester, setSemester] = useState(existing?.semester ?? "");
   const [startDate, setStartDate] = useState(existing?.start_date ?? "");
   const [endDate, setEndDate] = useState(existing?.end_date ?? "");
+  const [themeId, setThemeId] = useState(existing?.theme_id ?? "");
+  const [themes, setThemes] = useState<Theme[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // A failed lookup just leaves the picker on "Default" — it must not block
+  // authoring the rest of the challenge.
+  useEffect(() => {
+    void themeApi.listThemes().then(setThemes).catch(() => setThemes([]));
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -433,11 +643,11 @@ function ChallengeFormModal({
       let saved: Challenge;
       if (existing) {
         saved = await api.updateChallenge(existing.id, {
-          name, semester, start_date: startDate, end_date: endDate,
+          name, semester, start_date: startDate, end_date: endDate, theme_id: themeId,
         });
       } else {
         saved = await api.createChallenge({
-          name, semester, start_date: startDate, end_date: endDate,
+          name, semester, start_date: startDate, end_date: endDate, theme_id: themeId,
         });
       }
       onSaved(saved);
@@ -475,6 +685,24 @@ function ChallengeFormModal({
               required
               placeholder="e.g. Fall 2025"
             />
+          </div>
+          <div className={styles.fieldGroup}>
+            <label htmlFor="cf-theme">Theme</label>
+            <select
+              id="cf-theme"
+              value={themeId}
+              onChange={(e) => setThemeId(e.target.value)}
+            >
+              <option value="">Default</option>
+              {themes.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <p className={styles.fieldHint}>
+              Skins the student app. Switching themes needs no code change.
+            </p>
           </div>
           <div className={`${styles.fieldGroup} ${styles.fieldRow}`}>
             <div>

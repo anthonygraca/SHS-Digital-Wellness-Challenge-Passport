@@ -10,12 +10,14 @@ from app.schemas.passport import (
     CheckInResult,
     PassportOut,
     ScanCheckInRequest,
+    ThemeConfigOut,
     WeekOut,
 )
 from app.services.passport import (
     DuplicateCheckIn,
     InvalidEventToken,
     PassportView,
+    ThemeConfigView,
     build_passport,
     record_event_qr_checkin,
     record_manual_checkin,
@@ -39,10 +41,25 @@ def _event_qr_tip(title: str) -> str:
     )
 
 
+def _to_theme_config_out(cfg: ThemeConfigView | None) -> ThemeConfigOut | None:
+    if cfg is None:
+        return None
+    return ThemeConfigOut(
+        id=cfg.id,
+        palette=cfg.palette,
+        logoUrl=cfg.logo_url,
+        heroUrl=cfg.hero_url,
+        appTitle=cfg.app_title,
+        tagline=cfg.tagline,
+        copyTone=cfg.copy_tone,
+    )
+
+
 def _to_passport_out(view: PassportView) -> PassportOut:
     return PassportOut(
         challengeName=view.challenge_name,
         theme=view.theme,
+        themeConfig=_to_theme_config_out(view.theme_config),
         totalWeeks=view.total_weeks,
         completedWeeks=view.completed_weeks,
         remainingWeeks=view.remaining_weeks,

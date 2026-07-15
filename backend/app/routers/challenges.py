@@ -91,7 +91,7 @@ def update_challenge(
     claims: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Edit challenge core attributes (name, semester, dates)."""
+    """Edit challenge core attributes (name, semester, dates, theme)."""
     challenge = _get_challenge_or_404(db, claims["campus_id"], challenge_id)
     return svc.update_challenge(db, challenge, body)
 

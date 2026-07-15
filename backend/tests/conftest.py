@@ -23,6 +23,7 @@ from app.models.challenge import (  # noqa: F401  (register on Base.metadata)
     Task,
 )
 from app.models.student import Student  # noqa: F401  (register on Base.metadata)
+from app.models.theme import Theme  # noqa: F401  (register on Base.metadata)
 
 
 @pytest.fixture

@@ -1,7 +1,9 @@
 /**
- * Semester theme registry. Re-skinning is config: add a [data-theme] block in
- * tokens.css plus an entry here — zero component edits. ACTIVE_THEME will later
- * be sourced from the backend challenge/theme config (FR-B4).
+ * Semester theme registry. Re-skinning is config: the live theme — palette,
+ * assets and copy — comes from the backend on the passport response (FR-B4), and
+ * these entries are the fallback copy used before one has been fetched or when a
+ * challenge has no theme. The matching [data-theme] blocks in tokens.css are the
+ * companion color fallback.
  */
 export interface ThemeMeta {
   id: string;
@@ -25,4 +27,19 @@ export const THEMES: Record<string, ThemeMeta> = {
   },
 };
 
-export const ACTIVE_THEME = "stranger-things";
+/** Applied until a challenge's theme is known (and when it has none). */
+export const DEFAULT_THEME = "stranger-things";
+
+export const DEFAULT_APP_TITLE = "Wellness Passport";
+
+/** The copy to render: the server's theme first, then the registry, then defaults. */
+export function resolveThemeCopy(
+  themeId: string,
+  config: { appTitle: string; tagline: string } | null,
+): { appTitle: string; tagline: string } {
+  const fallback = THEMES[themeId];
+  return {
+    appTitle: config?.appTitle || fallback?.appTitle || DEFAULT_APP_TITLE,
+    tagline: config?.tagline || fallback?.tagline || "",
+  };
+}

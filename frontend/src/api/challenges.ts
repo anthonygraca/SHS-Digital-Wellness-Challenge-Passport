@@ -11,35 +11,15 @@ import type {
   AssessmentItemCreate,
   AssessmentItemUpdate,
 } from "../types/challenge";
+import { request as httpRequest } from "./http";
 
-const BASE = (import.meta.env.VITE_API_BASE ?? "") + "/api/challenges";
+// Re-exported so existing callers keep importing ApiError from this module.
+export { ApiError } from "./http";
 
-async function request<T>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...init.headers },
-    ...init,
-  });
-  if (!res.ok) {
-    const detail = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new ApiError(res.status, detail?.detail ?? res.statusText);
-  }
-  // 204 No Content — return undefined cast to T
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
-}
+const PREFIX = "/api/challenges";
 
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
+function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return httpRequest<T>(`${PREFIX}${path}`, init);
 }
 
 // ---------------------------------------------------------------------------
