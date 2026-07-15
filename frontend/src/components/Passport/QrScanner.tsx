@@ -28,39 +28,50 @@ export function QrScanner({
     let scanner: Html5Qrcode | null = null;
     let cancelled = false;
 
-    void import("html5-qrcode")
-      .then(({ Html5Qrcode }) => {
-        if (cancelled) return;
-        scanner = new Html5Qrcode(REGION_ID);
-        return scanner.start(
-          { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 240, height: 240 } },
-          (decodedText) => {
-            if (decodedRef.current) return;
-            decodedRef.current = true;
-            onDecodeRef.current(decodedText);
-          },
-          () => {
-            // Per-frame "no QR in view" callbacks are normal — ignore them.
-          },
+    const startPromise = import("html5-qrcode").then(({ Html5Qrcode }) => {
+      if (cancelled) return;
+      scanner = new Html5Qrcode(REGION_ID);
+      return scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 240, height: 240 } },
+        (decodedText) => {
+          if (decodedRef.current) return;
+          decodedRef.current = true;
+          onDecodeRef.current(decodedText);
+        },
+        () => {
+          // Per-frame "no QR in view" callbacks are normal — ignore them.
+        },
+      );
+    });
+
+    startPromise.catch(() => {
+      if (!cancelled) {
+        setError(
+          "Camera unavailable — allow camera access, or ask the attendant.",
         );
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setError(
-            "Camera unavailable — allow camera access, or ask the attendant.",
-          );
-        }
-      });
+      }
+    });
 
     return () => {
       cancelled = true;
-      if (scanner) {
-        scanner
-          .stop()
-          .catch(() => {})
-          .finally(() => scanner?.clear());
-      }
+      // Shut down only after start() settles: unmounting mid-startup (permission
+      // prompt still open) must not leave a just-granted camera stream running.
+      // stop() throws *synchronously* when the camera never reached the scanning
+      // state (e.g. permission denied), so it needs a try/catch, not just .catch().
+      void startPromise
+        .catch(() => {})
+        .finally(() => {
+          if (!scanner) return;
+          try {
+            scanner
+              .stop()
+              .catch(() => {})
+              .finally(() => scanner?.clear());
+          } catch {
+            scanner.clear();
+          }
+        });
     };
   }, []);
 
