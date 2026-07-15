@@ -1,13 +1,88 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as api from "../../../api/reports";
-import type { ParticipationReport } from "../../../types/report";
-import { SchoolIcon } from "../../icons";
+import type { AttendanceReport, ParticipationReport } from "../../../types/report";
+import { DownloadIcon, SchoolIcon } from "../../icons";
 import styles from "./Reports.module.css";
 
-/** Share of enrolled students who finished a week, guarded for an empty cohort. */
-function percent(completed: number, enrolled: number): number {
-  return enrolled > 0 ? Math.round((completed / enrolled) * 100) : 0;
+/** Share of `whole` that `part` makes up, guarded for an empty denominator. */
+function percent(part: number, whole: number): number {
+  return whole > 0 ? Math.round((part / whole) * 100) : 0;
+}
+
+/**
+ * Attendance capture (FR-F2 / US-22) — the design prototype's second A1 card.
+ * "Automatic" means event_qr and nothing else: a staff or manual check-in is a
+ * person doing the capture, which is exactly the effort this card measures.
+ *
+ * The API also ships a `staff` bucket, always 0 today because no write path
+ * mints it. It folds into "Manual / staff" rather than getting a row of its own —
+ * a permanently-empty third row would cost more attention than it pays back.
+ */
+function AttendanceCard({ report }: { report: AttendanceReport }) {
+  // A lookup, not a search that can legitimately miss: the API ships all three
+  // buckets every time. The ?? satisfies the type, it is not a real branch.
+  const autoCount = report.methods.find((m) => m.method === "event_qr")?.count ?? 0;
+  const autoPct = percent(autoCount, report.total_checkins);
+  // Derived by subtraction, not percent(total - auto, total): the two rows are
+  // one whole, and two independent roundings can sum to 101 (67 of 200 rounds to
+  // 34%, and the remaining 66.5% rounds to 67%) — which the stacked bar would
+  // render as an overflowing segment.
+  const manualPct = 100 - autoPct;
+
+  return (
+    <section className={styles.attendanceCard}>
+      <h2 className={styles.cardLabel}>Attendance capture</h2>
+      {report.total_checkins === 0 ? (
+        // Not a NaN guard — percent() already returns 0. Without this branch the
+        // complement above would paint a bar that is 100% manual for a challenge
+        // with no check-ins at all, which is a lie rather than a blank.
+        <p className={styles.attendanceEmpty}>No check-ins recorded yet.</p>
+      ) : (
+        <>
+          <ul className={styles.methodList} aria-label="Attendance capture by method">
+            <li className={styles.methodRow}>
+              <span
+                className={`${styles.swatch} ${styles.swatchAuto}`}
+                aria-hidden="true"
+              />
+              <span className={styles.methodLabel}>Auto (event QR)</span>
+              <span className={styles.methodPct}>{autoPct}%</span>
+            </li>
+            <li className={styles.methodRow}>
+              <span
+                className={`${styles.swatch} ${styles.swatchManual}`}
+                aria-hidden="true"
+              />
+              <span className={styles.methodLabel}>Manual / staff</span>
+              <span className={styles.methodPct}>{manualPct}%</span>
+            </li>
+          </ul>
+          {/* aria-hidden: the bar restates the two rows above, exactly as the
+              funnel's .track restates its count. */}
+          <div className={styles.stack} aria-hidden="true">
+            <span className={styles.stackAuto} style={{ width: `${autoPct}%` }} />
+            <span className={styles.stackManual} />
+          </div>
+          <p className={styles.methodTotal}>
+            {autoCount} of {report.total_checkins} check-ins captured automatically
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+/** Hand the CSV to the browser as a download named the way the server named it. */
+function saveFile(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  // The object URL pins the blob in memory until it is revoked, and nothing else
+  // holds a reference to this one once the click is dispatched.
+  URL.revokeObjectURL(url);
 }
 
 /**
@@ -18,29 +93,46 @@ function percent(completed: number, enrolled: number): number {
  * Always reports the campus's active challenge, which the server resolves — the
  * screen takes no challenge id, because "the challenge running now" is the only
  * one an admin can report on.
+ *
+ * The prize-list export (FR-F5 / US-26) is the one per-student read on the
+ * screen, and it never renders those rows: the CSV goes straight to the
+ * browser's downloads, so the dashboard itself stays aggregate.
  */
 export function Reports() {
   const navigate = useNavigate();
   const [report, setReport] = useState<ParticipationReport | null>(null);
+  const [attendance, setAttendance] = useState<AttendanceReport | null>(null);
   const [noActive, setNoActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const next = await api.getParticipationReport();
-      setReport(next);
+      // Promise.all rather than two awaits or allSettled: the two cards describe
+      // one moment in one challenge, so they land together or not at all. A
+      // partial update could show a funnel from now beside an auto share from a
+      // minute ago, and nothing on screen would say which was stale.
+      const [participation, attendanceNext] = await Promise.all([
+        api.getParticipationReport(),
+        api.getAttendanceReport(),
+      ]);
+      setReport(participation);
+      setAttendance(attendanceNext);
       setNoActive(false);
       setError(null);
     } catch (e) {
       if (e instanceof api.ApiError && e.status === 404) {
-        // Not a failure — the campus simply has nothing published yet.
+        // Not a failure — the campus simply has nothing published yet. Both
+        // routes resolve the same active challenge, so they 404 together.
         setNoActive(true);
         setReport(null);
+        setAttendance(null);
         setError(null);
         return;
       }
       // A failed refresh keeps the numbers already on screen rather than
-      // blanking them; only speak up when there is nothing to keep.
+      // blanking them; only speak up when there is nothing to keep. Promise.all
+      // set neither card, so both keep their last good read.
       setReport((prev) => {
         if (prev === null) {
           setError(
@@ -55,6 +147,24 @@ export function Reports() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const exportPrizeList = useCallback(async () => {
+    setExporting(true);
+    try {
+      const { blob, filename } = await api.exportPrizeCsv();
+      saveFile(blob, filename);
+      setError(null);
+    } catch (e) {
+      // Unlike a failed refresh, this always speaks up: there is no stale file
+      // on screen to fall back on, and an admin who gets no download owes an
+      // explanation rather than silence.
+      setError(
+        e instanceof api.ApiError ? e.message : "Could not export the prize list",
+      );
+    } finally {
+      setExporting(false);
+    }
+  }, []);
 
   return (
     <div className={styles.page}>
@@ -76,12 +186,30 @@ export function Reports() {
       </header>
 
       <main className={styles.content}>
-        {report && (
-          <p className={styles.eyebrow}>
-            {report.challenge.semester} · {report.challenge.name}
-          </p>
-        )}
-        <h1 className={styles.title}>Reporting dashboard</h1>
+        <div className={styles.header}>
+          <div>
+            {report && (
+              <p className={styles.eyebrow}>
+                {report.challenge.semester} · {report.challenge.name}
+              </p>
+            )}
+            <h1 className={styles.title}>Reporting dashboard</h1>
+          </div>
+
+          {/* Only once a challenge has loaded: with nothing published there is
+              no drawing to export, and the button would only 404. */}
+          {report && (
+            <button
+              type="button"
+              className={styles.exportBtn}
+              onClick={() => void exportPrizeList()}
+              disabled={exporting}
+            >
+              <DownloadIcon size={19} />
+              {exporting ? "Exporting…" : "Export prize list (CSV)"}
+            </button>
+          )}
+        </div>
 
         {error && (
           <p className={styles.error} role="alert">
@@ -98,7 +226,7 @@ export function Reports() {
 
         {!report && !error && !noActive && <p className={styles.empty}>Loading…</p>}
 
-        {report && (
+        {report && attendance && (
           <>
             <section className={styles.statCard}>
               <span className={styles.statIcon}>
@@ -141,6 +269,8 @@ export function Reports() {
                 </ol>
               )}
             </section>
+
+            <AttendanceCard report={attendance} />
           </>
         )}
       </main>

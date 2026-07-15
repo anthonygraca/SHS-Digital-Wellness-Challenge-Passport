@@ -1,12 +1,17 @@
-"""Aggregate reporting over a challenge (UC-10 / FR-F1).
+"""Reporting over a challenge (UC-10 / FR-F1, FR-F2, FR-F5).
 
 Read-only and cohort-wide, which is what separates this from passport.py: that
-module derives one student's progress, this one counts across all of them. Both
+module derives one student's progress, this one reads across all of them. Both
 answer "is this week complete?" the same way — a CheckIn row for the week's Task
 — so the funnel and a student's own passport can never disagree.
 
-Nothing is cached or stored: every request re-derives the counts, so a check-in
-recorded a second ago is in the next refresh (US-21, scenario 2).
+Nothing is cached or stored: every request re-derives the answer, so a check-in
+recorded a second ago is in the next refresh (US-21, scenario 2) and in the next
+export (US-26, scenario 2).
+
+participation_report and attendance_report are aggregate (FR-F6);
+prize_eligible_students is the one per-student read here, because a drawing list
+has to name its entrants.
 """
 
 from __future__ import annotations
@@ -15,8 +20,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.challenge import Challenge, CheckIn, Enrollment, Task
+from app.models.student import Student
 from app.schemas.report import (
+    METHOD_ORDER,
+    AttendanceReportOut,
+    MethodCountOut,
     ParticipationReportOut,
+    PrizeEligibleRow,
     ReportChallengeOut,
     WeekCompletionOut,
 )
@@ -72,3 +82,108 @@ def participation_report(db: Session, challenge: Challenge) -> ParticipationRepo
             for task_id, position, title, required, completed_count in rows
         ],
     )
+
+
+def attendance_report(db: Session, challenge: Challenge) -> AttendanceReportOut:
+    """Check-in counts broken down by capture method for one challenge (FR-F2).
+
+    CheckIn carries no challenge_id, so the scope comes from a join through Task:
+    a check-in belongs to the challenge its task belongs to. That join does here
+    what the challenge_id filter does in participation_report — it is the only
+    thing keeping another campus's check-ins out of the counts.
+
+    count(*), not count(distinct student_id) as the funnel uses: this report
+    counts *captures*, not students. One student scanning six weeks is six units
+    of effort the system saved, and six is the honest number.
+    """
+    rows = db.execute(
+        select(CheckIn.method, func.count().label("count"))
+        .join(Task, Task.id == CheckIn.task_id)
+        .where(Task.challenge_id == challenge.id)
+        .group_by(CheckIn.method)
+    ).all()
+
+    # GROUP BY only emits methods that have rows, but the report owes the reader
+    # all three buckets: "staff: 0" is a finding — nothing writes that method
+    # today — not an absence to hide. Same reason the funnel keeps its zero
+    # weeks. Seeding from METHOD_ORDER also fixes the order the client renders in.
+    counts = dict.fromkeys(METHOD_ORDER, 0)
+    for method, count in rows:
+        if method in counts:
+            counts[method] = count
+
+    # Counted across every row, not summed from the buckets above. A method
+    # outside CheckInMethod would be a write-path bug; a total that quietly
+    # dropped it would hide the bug, where this makes it surface as a gap in the
+    # reconciliation the report promises. No write path can mint one today.
+    total_checkins = sum(count for _, count in rows)
+
+    return AttendanceReportOut(
+        challenge=ReportChallengeOut.model_validate(challenge),
+        total_checkins=total_checkins,
+        methods=[
+            MethodCountOut(method=method, count=count) for method, count in counts.items()
+        ],
+    )
+
+
+def prize_eligible_students(db: Session, challenge: Challenge) -> list[PrizeEligibleRow]:
+    """Students who have completed every required task of one challenge (FR-F5 / US-26).
+
+    The same rule passport.py derives for a single student, expressed set-wise for
+    the whole cohort: restrict to the challenge's *required* tasks, then keep the
+    students whose distinct completions cover all of them. Optional tasks fall out
+    of the query rather than being filtered later, which is why finishing or
+    skipping one can never change eligibility.
+
+    Derived per call, never stored — so an export run a second after a student's
+    final check-in already contains them (US-26, scenario 2).
+    """
+    required_ids = list(
+        db.execute(
+            select(Task.id).where(
+                Task.challenge_id == challenge.id, Task.required.is_(True)
+            )
+        ).scalars()
+    )
+
+    # No required tasks means nobody is eligible, not everybody: the same guard
+    # passport.py applies (``required_total > 0``) so an all-optional challenge
+    # never exports the whole cohort for free. Also avoids a HAVING count == 0.
+    if not required_ids:
+        return []
+
+    # Enrollment is deliberately not joined. Passport eligibility doesn't consult
+    # it either, and campus isolation already comes from the caller-resolved
+    # challenge — joining it here could drop a student who has check-ins but no
+    # enrollment row, making this export disagree with that student's own passport.
+    #
+    # The HAVING *is* the "completed every required task" rule: count(distinct
+    # task_id) over the required set can only reach len(required_ids) when the
+    # student has one check-in per required task.
+    rows = db.execute(
+        select(
+            Student.id,
+            Student.sso_subject,
+            func.count(func.distinct(CheckIn.task_id)).label("required_completed"),
+            func.max(CheckIn.ts).label("eligible_since"),
+        )
+        .join(CheckIn, CheckIn.student_id == Student.id)
+        .where(CheckIn.task_id.in_(required_ids))
+        .group_by(Student.id, Student.sso_subject)
+        .having(func.count(func.distinct(CheckIn.task_id)) == len(required_ids))
+        # Ordered so two exports of unchanged data are byte-identical: the drawing
+        # list is a record, and a diff between re-exports should mean something.
+        .order_by(func.max(CheckIn.ts), Student.id)
+    ).all()
+
+    return [
+        PrizeEligibleRow(
+            student_id=student_id,
+            sso_subject=sso_subject,
+            required_completed=required_completed,
+            required_total=len(required_ids),
+            eligible_since=eligible_since,
+        )
+        for student_id, sso_subject, required_completed, eligible_since in rows
+    ]

@@ -37,6 +37,67 @@ friction for students. A **Progressive Web App** gives: install-to-home-screen, 
 scanning, push-capable, SSO in-browser, one codebase, instant updates. This is the pragmatic and
 correct choice.
 
+**As built (US-6 / FR-C4).** `vite-plugin-pwa` generates the service worker; the manifest lives in
+`frontend/src/pwa/manifest.ts` rather than inline in `vite.config.ts` so it is typechecked and
+assertable from a test. Four decisions in it are not readable off the code:
+
+**Icons are committed PNGs, not SVG, and not build output.** Chrome's install criteria want a 192x192
+and a 512x512. Declaring an SVG instead requires `sizes: "any"`, which is the configuration behind two
+open Chromium install bugs (40925759, 40911689) — the one option that reliably breaks installability.
+They are rasterised once from the `.svg` sources in `frontend/public/icons/` and committed as brand
+assets, so no dependency or CI step exists to rot:
+
+```
+cd frontend/public/icons
+rsvg-convert -w 192 -h 192 icon.svg          -o pwa-192.png
+rsvg-convert -w 512 -h 512 icon.svg          -o pwa-512.png
+rsvg-convert -w 512 -h 512 icon-maskable.svg -o pwa-maskable-512.png
+rsvg-convert -w 180 -h 180 icon.svg          -o apple-touch-icon-180.png
+```
+
+The maskable variant is scaled to 0.98 rather than filling the tile because the platform crops it to a
+guaranteed circle of 80% of the width: the mark's circumradius, not its bounding box, is what has to
+fit. `apple-touch-icon` is not redundant — iOS ignores manifest icons for the home screen entirely.
+
+**`start_url` is `/passport`, not `/`.** `/` routes through the landing, which fetches enrollment
+status unconditionally, so an offline launch from the home screen would open on "we couldn't load your
+challenge". The installed app's user is by definition a student mid-challenge. The cost is that
+`/passport` must redirect admins to `/admin` (staff would otherwise land on "not eligible to join"),
+and that an un-enrolled student who installs sees "no active challenge yet" with no route to the join
+CTA — accepted, as an un-enrolled student has no reason to install.
+
+**`workbox.navigateFallbackDenylist` is load-bearing, not hygiene.** `navigateFallback` defaults to
+`index.html`, and Workbox answers *any* navigation it handles with the precached shell. `/auth/login`
+is a top-level redirect into the SAML IdP, not a fetch, so without the denylist a live service worker
+serves it the SPA: the catch-all route bounces to `/` and the student is stranded on a sign-in button
+that does nothing. This was inert only while the manifest shipped `icons: []` and the app could never
+install — adding icons is what arms it. Verified by removing the denylist and watching sign-in break.
+
+**Offline data is a localStorage snapshot, not a Workbox runtime cache.** The service worker precaches
+only the app shell. `frontend/src/offline/snapshot.ts` stores the last session and passport; the
+consumers (`SessionProvider`, the `Passport` container) catch the rejected fetch and fall back. This
+splits cleanly from the SW — it is unit-testable in jsdom, where no service worker runs — and it keeps
+the *staleness* visible to the UI, which a transparent cache cannot express.
+
+Two invariants hold it together. **A snapshot only ever survives because we were offline:** the server
+is the authority on who is signed in, so an authoritative signed-out clears both keys, and sign-out
+clears them unconditionally whether or not the server could be reached — this is an SSO subject plus
+participation data on a phone students share (no PHI, but close enough to not leave lying around).
+And **only a successful fetch writes:** `fetchPassport` returns null for any `!res.ok` including a
+transient 500, so clearing on null would cost a student their offline passport over one blip.
+
+`navigator.onLine` drives only what we *say* — the banner and the refusal — never the fallback. It
+reports whether an interface exists, so a captive portal reports online while every fetch fails; the
+fallback keys off the rejected fetch instead, which cannot be fooled that way.
+
+**Check-ins are refused offline, never queued.** Deliberate, and not merely because the story says so:
+the server validates each QR token's freshness, so a scan replayed on reconnect would be rejected
+anyway — after the student had already been shown a completed week. A background-sync queue here would
+be a promise the system cannot keep. Do not add one.
+
+Known gap: the Roboto/Oswald/Cinzel stack loads from Google Fonts, so an offline passport falls back
+to system fonts. Cosmetic, and fixable with the standard Workbox font-caching recipe if it matters.
+
 ### 2.2 The QR check-in model  ✅
 Two directions exist; support the simple one first, keep the strong one as a config option.
 

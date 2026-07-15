@@ -1,4 +1,6 @@
-/** Mirrors backend/app/schemas/report.py — participation reporting (UC-10). */
+/** Mirrors backend/app/schemas/report.py — admin reporting (UC-10). */
+
+import type { CheckInMethod } from "./challenge";
 
 export interface ReportChallenge {
   id: number;
@@ -21,4 +23,22 @@ export interface ParticipationReport {
   challenge: ReportChallenge;
   total_enrollments: number;
   weeks: WeekCompletion[];
+}
+
+/** How many check-ins one capture method accounted for. */
+export interface MethodCount {
+  method: CheckInMethod;
+  count: number;
+}
+
+/**
+ * Auto-vs-manual attendance breakdown (FR-F2 / US-22). All three methods always
+ * arrive, `staff` included — a structural 0 until a staff-verified capture path
+ * exists. Counts only: the auto share is the client's to compute, and
+ * `total_checkins` is what the buckets reconcile against.
+ */
+export interface AttendanceReport {
+  challenge: ReportChallenge;
+  total_checkins: number;
+  methods: MethodCount[];
 }

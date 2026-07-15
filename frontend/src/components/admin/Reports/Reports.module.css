@@ -1,5 +1,6 @@
-/* Reporting dashboard (FR-F1 / US-21) — screen A1 of the design prototype:
-   an enrolled-count tile above a per-week completion funnel of horizontal bars.
+/* Reporting dashboard (FR-F1 / US-21, FR-F5 / US-26) — screen A1 of the design
+   prototype: an enrolled-count tile above a per-week completion funnel of
+   horizontal bars, with the prize-list export on the title row.
    Mobile-first: the prototype's desktop columns become one stacked column on a
    phone, with the funnel card full width at every size. */
 
@@ -72,7 +73,45 @@
   font-family: var(--wp-font-display);
   font-size: 30px;
   font-weight: 700;
-  margin: 0 0 24px;
+  margin: 0;
+}
+
+/* The prototype puts the export button on the right of the title row. On a phone
+   there is no room beside a 30px display title, so the button drops below it and
+   goes full width — an easy thumb target rather than a cramped corner one. The
+   row only re-forms once there is width for both. */
+.header {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.exportBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 20px;
+  border: none;
+  border-radius: 22px;
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.exportBtn:hover { background: color-mix(in srgb, var(--wp-primary) 88%, black); }
+.exportBtn:focus-visible { outline: 3px solid var(--wp-primary); outline-offset: 2px; }
+.exportBtn:disabled { opacity: 0.6; cursor: default; }
+
+@media (min-width: 560px) {
+  .header {
+    grid-template-columns: 1fr auto;
+    align-items: end;
+  }
+  .exportBtn { width: auto; }
 }
 
 .cardLabel {
@@ -157,7 +196,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fill { transition: none; }
+  .fill,
+  .stackAuto { transition: none; }
 }
 
 .value {
@@ -168,6 +208,83 @@
 }
 
 .funnelEmpty {
+  font-size: 13px;
+  color: var(--wp-on-surface-variant);
+  margin: 0;
+}
+
+/* ── Attendance capture (FR-F2 / US-22) ───────────────────────── */
+/* Card chrome matches .funnelCard — the two are peers on one dashboard. */
+.attendanceCard {
+  background: var(--wp-surface-container);
+  border-radius: 20px;
+  padding: 20px;
+  margin-top: 16px;
+}
+
+.methodList {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 0;
+}
+
+/* Swatch | label | percent, with the percent on its own rail so the two rows'
+   numbers stack and read as a comparison rather than as two sentences. */
+.methodRow {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.swatchAuto { background: var(--wp-primary); }
+.swatchManual { background: var(--wp-outline); }
+
+.methodLabel { color: var(--wp-on-surface-variant); }
+
+.methodPct {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* One bar, two segments: the auto segment is sized and the remainder flexes, so
+   the pair fills the track exactly however the percentage rounds. The track's own
+   background matches the manual segment, so a 0% auto share reads as a full
+   manual bar rather than as a hole. */
+.stack {
+  display: flex;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--wp-outline);
+}
+
+.stackAuto {
+  background: var(--wp-primary);
+  transition: width 0.3s ease;
+}
+
+.stackManual {
+  flex: 1;
+  background: var(--wp-outline);
+}
+
+.methodTotal {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+  margin: 12px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.attendanceEmpty {
   font-size: 13px;
   color: var(--wp-on-surface-variant);
   margin: 0;
