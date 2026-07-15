@@ -136,6 +136,9 @@ Enrollment(id, student_id, challenge_id, enrolled_at)
 
 CheckIn(id, student_id, task_id, ts, method[event_qr|staff|manual],   -- R4 replaces sticker/clicker
         verified_by)
+CheckInAudit(id, campus_id, student_id, task_id, checkin_id,          -- FR-D6 append-only ledger
+             action[create|update|delete], actor_subject, reason, ts,
+             prior_state_json, new_state_json)                         -- NO FKs; see below
 QuizResponse(id, student_id, quiz_item_id, response, score,           -- R8 auto-scored
              ai_feedback, scored_by[auto|human], ts)
 ContentView(id, student_id, task_id, content_ref, ts)                 -- engagement metric
@@ -148,6 +151,23 @@ Erika's "two students, same name" concern).
 
 **Prize eligibility is a query, not a flag** — derived from completion of required tasks, so it's
 always correct and auditable.
+
+**The audit ledger carries no foreign keys (FR-D6).** `CheckIn` stays the single source of truth for
+"is this complete?"; `CheckInAudit` is the append-only record of who changed it, when, why, and what
+it looked like before. It is deliberately *not* FK'd to `checkins`, `students`, or `tasks`: a check-in
+row is hard-deleted when an admin removes a completion, and students/tasks cascade-delete their
+dependents — so an FK could only cascade (destroying the very evidence FR-D6 exists to guarantee) or
+SET NULL (losing the correlation). `RESTRICT` would preserve the ledger but block legitimate task
+deletion. Instead each row carries a self-contained JSON snapshot (including the student's
+`sso_subject`, never a name) plus plain indexed integers, so it outlives anything it points at.
+`campus_id` is denormalized onto the row for the same reason: audit reads stay campus-isolated after
+the task is gone.
+
+Two consequences worth knowing. `method="manual"` does **not** by itself mean "an admin did this" —
+a student's own passport check-in also writes `manual`; the admin override is identified by
+`verified_by` being set plus the presence of an audit row. And SQLite ships `PRAGMA foreign_keys=OFF`
+and the app never enables it, so the `ondelete="CASCADE"` declarations elsewhere are currently inert
+and would only start firing on Postgres — the FK-free ledger is correct under both.
 
 **Theme is data, not code (R6 / NFR-6).** `Theme.id` is a slug that doubles as the SPA's
 `data-theme` value, so a theme's static token block still skins the app if its row is missing.

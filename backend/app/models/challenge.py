@@ -211,3 +211,54 @@ class AssessmentItem(Base):
     )
 
     task: Mapped[Task] = relationship("Task", back_populates="assessment_items")
+
+
+class CheckInAudit(Base):
+    """An append-only ledger of an admin's manual completion change (FR-D6).
+
+    ``CheckIn`` remains the single source of truth for "is this complete?"; this
+    table records *who* changed it, *when*, *why*, and *what it looked like
+    before*. Rows are only ever inserted — never updated or deleted.
+
+    Deliberately NOT foreign-keyed to checkins / students / tasks. A ``checkins``
+    row is hard-deleted when an admin removes a completion, and both ``students``
+    and ``tasks`` cascade-delete their dependents — so an FK here could only
+    cascade (destroying the very evidence FR-D6 exists to guarantee) or SET NULL
+    (losing the correlation). RESTRICT would preserve the ledger but block
+    legitimate task deletion. Instead the ledger carries self-contained snapshots
+    and plain indexed integers, so it outlives anything it points at.
+    """
+
+    __tablename__ = "checkin_audits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # Denormalized from the challenge so audit reads stay campus-isolated even
+    # after the referenced task is gone.
+    campus_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+
+    # Plain integers, not FKs — see the class docstring.
+    student_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    task_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    # The checkin row's id at the time of the action. A correlation hint only:
+    # SQLite reuses rowids, so a later check-in may reappear under the same id.
+    checkin_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # "create" | "update" | "delete"
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    # The acting admin's SSO subject (session claims["sub"]). No name, no PHI —
+    # the same privacy guarantee the Student model makes.
+    actor_subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Required and non-blank; enforced at the schema layer.
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False, index=True
+    )
+
+    # Full snapshots of the check-in either side of the change. prior_state is
+    # None for "create"; new_state is None for "delete". Datetimes are stored
+    # ISO-8601 — the JSON column cannot serialize a datetime.
+    prior_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    new_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)

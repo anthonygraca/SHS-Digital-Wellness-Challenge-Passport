@@ -220,6 +220,10 @@
   gap: 10px;
   border: 2px solid transparent;
   transition: border-color 0.12s, opacity 0.12s;
+  /* Let the action row drop below the title rather than crushing it: with four
+     buttons at 360px, .taskActions (flex-shrink:0) would otherwise squeeze the
+     title down to one word per line. Pairs with .taskBody's flex-basis. */
+  flex-wrap: wrap;
 }
 
 .taskItem[data-dragging="true"] {
@@ -250,7 +254,9 @@
 }
 
 .taskBody {
-  flex: 1;
+  /* min-width:0 keeps long words ellipsis-able; the basis is what makes the
+     action row wrap to its own line once the title would get too narrow. */
+  flex: 1 1 min(200px, 100%);
   min-width: 0;
 }
 
@@ -272,6 +278,10 @@
   display: flex;
   gap: 2px;
   flex-shrink: 0;
+  /* Four buttons (Items / Check-ins / Edit / Delete) crush the row at 360px
+     without this; .taskBody has min-width:0 so it absorbs the reflow. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 /* Event check-in QR (US-8) — printed/displayed under each task for students to scan. */
@@ -524,4 +534,159 @@
 
 .optionRow input {
   flex: 1;
+}
+
+/* ── Manual completion override + audit (FR-D6 / US-27) ───────── */
+
+/* This panel is used at a live event, on a phone, one-handed. The shared
+   .btnPrimary/.btnSecondary floor is 40px, under the 44px CLAUDE.md requires;
+   scoped here rather than raised globally so the other modals keep their
+   current metrics. Verified at 360px — every button in the dialog clears 44. */
+.overridePanel button {
+  min-height: 44px;
+}
+
+.tabRow {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 12px;
+  flex-wrap: wrap;
+}
+
+.tabBtn {
+  flex: 1;
+  min-width: 120px;
+  /* 44px floor per CLAUDE.md — these are primary targets on a phone. */
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--wp-outline-variant);
+  border-radius: 22px;
+  background: transparent;
+  color: var(--wp-on-surface-variant);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.tabBtn:focus-visible,
+.tabBtnActive:focus-visible {
+  outline: 3px solid var(--wp-primary);
+  outline-offset: 2px;
+}
+
+.tabBtnActive {
+  composes: tabBtn;
+  border-color: var(--wp-primary);
+  background: color-mix(in srgb, var(--wp-primary) 14%, transparent);
+  color: var(--wp-primary);
+  font-weight: 600;
+}
+
+.checkinList,
+.auditList {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Stacked, not side-by-side: at 360px a row of 44px targets would collide. */
+.checkinRow,
+.auditRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--wp-outline-variant);
+  border-radius: 10px;
+  background: var(--wp-surface-container);
+}
+
+.checkinSubject {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--wp-on-surface);
+  /* Long subjects must ellipsis, never widen the modal. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkinMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+}
+
+.checkinActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.checkinActions button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+}
+
+.methodBadge,
+.actionBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--wp-on-surface) 10%, transparent);
+  color: var(--wp-on-surface-variant);
+}
+
+.actionCreate {
+  background: color-mix(in srgb, var(--wp-primary) 16%, transparent);
+  color: var(--wp-primary);
+}
+
+.actionUpdate {
+  background: color-mix(in srgb, var(--wp-on-surface) 12%, transparent);
+  color: var(--wp-on-surface);
+}
+
+.actionDelete {
+  background: color-mix(in srgb, var(--wp-error) 14%, transparent);
+  color: var(--wp-error);
+}
+
+.auditReason {
+  margin: 0;
+  font-size: 13px;
+  color: var(--wp-on-surface);
+  overflow-wrap: anywhere;
+}
+
+.auditRow summary {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+  cursor: pointer;
+  min-height: 24px;
+}
+
+.auditSnapshot {
+  margin: 6px 0 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wp-on-surface) 6%, transparent);
+  color: var(--wp-on-surface-variant);
+  font-size: 11px;
+  line-height: 1.4;
+  /* Snapshots are wide — scroll them, never the page body. */
+  overflow-x: auto;
 }
