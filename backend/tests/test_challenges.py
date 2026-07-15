@@ -473,9 +473,7 @@ class TestDuplicateChallenge:
         copy_id = client.post(f"/api/challenges/{challenge_id}/duplicate").json()["id"]
 
         with db_sessionmaker() as db:
-            copied = (
-                db.query(Enrollment).filter(Enrollment.challenge_id == copy_id).all()
-            )
+            copied = db.query(Enrollment).filter(Enrollment.challenge_id == copy_id).all()
             original = (
                 db.query(Enrollment).filter(Enrollment.challenge_id == challenge_id).all()
             )
