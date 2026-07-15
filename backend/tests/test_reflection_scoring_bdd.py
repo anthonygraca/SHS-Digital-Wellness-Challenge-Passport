@@ -242,7 +242,8 @@ def the_stored_score_updates(client, context):
 
     # Re-read rather than trust the PATCH echo — see the module docstring.
     row = next(
-        r for r in client.get(_responses_url(context)).json()
+        r
+        for r in client.get(_responses_url(context)).json()
         if r["id"] == context["response_id"]
     )
     assert row["score"] == OVERRIDE_SCORE
@@ -251,7 +252,8 @@ def the_stored_score_updates(client, context):
 @then('scored_by is set to "human"')
 def scored_by_is_set_to_human(client, context):
     row = next(
-        r for r in client.get(_responses_url(context)).json()
+        r
+        for r in client.get(_responses_url(context)).json()
         if r["id"] == context["response_id"]
     )
     assert row["scored_by"] == "human"

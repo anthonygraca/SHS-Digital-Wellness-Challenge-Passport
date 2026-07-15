@@ -385,15 +385,11 @@ class TestAccess:
         ).json()
 
         other_url = _responses_url({**scored, "item_id": other["id"]})
-        resp = client.patch(
-            f"{other_url}/{scored['response_id']}", json={"score": 1.0}
-        )
+        resp = client.patch(f"{other_url}/{scored['response_id']}", json={"score": 1.0})
         assert resp.status_code == 404
 
     def test_an_unknown_response_is_404(self, client, scored):
-        resp = client.patch(
-            f"{_responses_url(scored)}/999999", json={"score": 1.0}
-        )
+        resp = client.patch(f"{_responses_url(scored)}/999999", json={"score": 1.0})
         assert resp.status_code == 404
 
     def test_an_admin_from_another_campus_gets_404(self, client, db_sessionmaker):

@@ -173,9 +173,7 @@ def list_week_items(
             prompt=item.prompt,
             outcome_tag=item.outcome_tag,
             options=list(item.options or []),
-            your_response=_stored_view(
-                responses.get(item.id), item_type=item.item_type
-            ),
+            your_response=_stored_view(responses.get(item.id), item_type=item.item_type),
         )
         for item in items
     ]
@@ -324,9 +322,7 @@ def score_reflection(
     # that looks exactly like a right one. This check lives here rather than in a schema
     # because the scorer's output never passes through one.
     if not INCORRECT_SCORE <= result.score <= CORRECT_SCORE:
-        raise ScoringUnavailable(
-            f"Scorer returned {result.score!r}, outside 0.0..1.0"
-        )
+        raise ScoringUnavailable(f"Scorer returned {result.score!r}, outside 0.0..1.0")
 
     db.add(
         AssessmentResponse(
