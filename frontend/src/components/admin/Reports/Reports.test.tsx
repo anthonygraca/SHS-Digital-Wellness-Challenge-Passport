@@ -6,6 +6,7 @@ import type { ChallengeSummary } from "../../../types/challenge";
 import type {
   AttendanceReport,
   EngagementReport,
+  LearningOutcomeReport,
   ParticipationReport,
   WeekCompletion,
 } from "../../../types/report";
@@ -20,6 +21,7 @@ const api = vi.hoisted(() => ({
   getParticipationReport: vi.fn(),
   getAttendanceReport: vi.fn(),
   getEngagementReport: vi.fn(),
+  getLearningOutcomeReport: vi.fn(),
   exportPrizeCsv: vi.fn(),
   listChallenges: vi.fn(),
 }));
@@ -34,6 +36,7 @@ vi.mock("../../../api/reports", async (importOriginal) => ({
   getParticipationReport: api.getParticipationReport,
   getAttendanceReport: api.getAttendanceReport,
   getEngagementReport: api.getEngagementReport,
+  getLearningOutcomeReport: api.getLearningOutcomeReport,
   exportPrizeCsv: api.exportPrizeCsv,
 }));
 // The challenge list feeds the selector only, and comes from the challenges
@@ -77,13 +80,14 @@ beforeEach(() => {
   // implementation, this one included, and a createObjectURL returning undefined
   // fails as a wrong href rather than as a missing stub.
   createObjectURL.mockReturnValue(objectUrl);
-  // The three cards load together under one Promise.all, so a test about the
-  // funnel still needs attendance and engagement to resolve. Individual tests
-  // override. A fourth card added to that Promise.all needs a default here too,
-  // or every test in this file fails on the card it never mentions.
+  // The four cards load together under one Promise.all, so a test about the
+  // funnel still needs attendance, engagement and outcomes to resolve. Individual
+  // tests override. A fifth card added to that Promise.all needs a default here
+  // too, or every test in this file fails on the card it never mentions.
   api.getParticipationReport.mockResolvedValue(asReport());
   api.getAttendanceReport.mockResolvedValue(asAttendance());
   api.getEngagementReport.mockResolvedValue(asEngagement());
+  api.getLearningOutcomeReport.mockResolvedValue(asOutcomes());
   // One published challenge by default: the selector only appears when there is a
   // choice to make, so this keeps it out of the way of the card tests.
   api.listChallenges.mockResolvedValue([asChallenge(1, "Fall 2026")]);
@@ -143,6 +147,49 @@ const asEngagement = (over: Partial<EngagementReport> = {}): EngagementReport =>
     { content_ref: "tip", count: 30 },
   ],
   guide_sessions: 0,
+  ...over,
+});
+
+/**
+ * Two scored tags and one nobody has answered, plus the human bucket's structural
+ * zero — the shape the report has until US-19 ships the reflection override.
+ *
+ * Alphabetical, because the server orders that way and the card does not re-sort.
+ * The means are 0.84 and 0.79, the prototype's own numbers, so fixture and card
+ * agree. total_responses is 200 against a 0.82 mean that is deliberately *not* the
+ * average of 0.84 and 0.79 (0.815): the total is weighted by response, and a card
+ * that recomputed it from the rows would land on the wrong number.
+ */
+const asOutcomes = (over: Partial<LearningOutcomeReport> = {}): LearningOutcomeReport => ({
+  challenge: {
+    id: 1,
+    name: "Stranger Things Wellness",
+    semester: "Fall 2026",
+    theme_id: "stranger-things",
+  },
+  total_responses: 200,
+  mean_score: 0.82,
+  total_human_scored: 0,
+  outcomes: [
+    {
+      outcome_tag: "know-your-numbers",
+      mean_score: 0.84,
+      response_count: 120,
+      human_scored_count: 0,
+    },
+    {
+      outcome_tag: "sleep-hygiene",
+      mean_score: null,
+      response_count: 0,
+      human_scored_count: 0,
+    },
+    {
+      outcome_tag: "stress-management",
+      mean_score: 0.79,
+      response_count: 80,
+      human_scored_count: 0,
+    },
+  ],
   ...over,
 });
 
@@ -708,6 +755,339 @@ const selector = () => screen.getByRole("combobox", { name: /challenge/i });
 
 const TWO_CHALLENGES = [asChallenge(1, "Fall 2026"), asChallenge(2, "Spring 2026")];
 
+/** The scored outcome rows, in the order they are rendered. */
+const outcomeRows = () =>
+  within(
+    screen.getByRole("list", { name: /mean score by learning outcome/i }),
+  ).getAllByRole("listitem");
+
+/** The sized fill of one outcome row's bar — a mean made visible. */
+const outcomeFills = () =>
+  Array.from(document.querySelectorAll<HTMLElement>(`.${styles.outcomeFill}`));
+
+describe("Learning-outcome report (US-24 / FR-F4)", () => {
+  it("groups scores by outcome tag", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // One row per tag, each carrying its own mean — not one row per question, and
+    // not one per student.
+    expect(outcomeRows().map((li) => li.textContent)).toEqual([
+      "Know your numbers84%",
+      "Stress management79%",
+    ]);
+  });
+
+  it("keeps the server's order instead of ranking by score", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        outcomes: [
+          {
+            outcome_tag: "alpha-outcome",
+            mean_score: 0.1,
+            response_count: 100,
+            human_scored_count: 0,
+          },
+          {
+            outcome_tag: "zebra-outcome",
+            mean_score: 0.9,
+            response_count: 100,
+            human_scored_count: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // The scores oppose the names on purpose. The default fixture's 84/79 happen to
+    // fall alphabetically too, so it would pass this by coincidence — and a card
+    // that ranked worst-first or best-first would go undetected.
+    //
+    // The order is the server's ORDER BY, and the card does not re-sort: an outcome
+    // tag is admin-authored, so there is no sequence to impose here, and ranking by
+    // score would move a row every time its mean crossed a rounding boundary —
+    // reshuffling the card under an admin who just hit Refresh.
+    expect(outcomeRows().map((li) => li.textContent)).toEqual([
+      "Alpha outcome10%",
+      "Zebra outcome90%",
+    ]);
+  });
+
+  it("renders the mean as a percentage, not the raw fraction", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // 0.84 arrives; "84%" is shown. The server ships the aggregate and the client
+    // decides what it looks like — the same split the attendance card's share follows.
+    expect(screen.getByText("84%")).toBeInTheDocument();
+    expect(screen.queryByText("0.84")).toBeNull();
+  });
+
+  it("sizes each bar to that outcome's mean", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // A mean is already a proportion — it fills a bar without a denominator, which
+    // is why this card needs no total to divide by the way the others do.
+    expect(outcomeFills().map((el) => el.style.width)).toEqual(["84%", "79%"]);
+  });
+
+  it("reports the weighted average and the count it was taken over", async () => {
+    render(<Reports />);
+
+    // 82%, the server's response-weighted mean — pointedly not 81.5%, the average
+    // of the two rows. A card that recomputed the total from what it rendered
+    // would let 80 responses outvote 120 and land on the wrong number.
+    expect(await screen.findByText(/200 responses · 82% average/i)).toBeInTheDocument();
+  });
+
+  it("names the tags nobody has answered instead of drawing them a bar", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // sleep-hygiene has items but no responses. A 0%-wide bar would read as "the
+    // cohort bombed it" — the one finding on this card actually worth acting on —
+    // when the truth is the question has not been asked yet.
+    expect(screen.getByText(/not answered yet: sleep hygiene/i)).toBeInTheDocument();
+    expect(outcomeRows()).toHaveLength(2);
+  });
+
+  it("says nothing about unanswered tags when every tag has scores", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        outcomes: [
+          {
+            outcome_tag: "know-your-numbers",
+            mean_score: 0.84,
+            response_count: 200,
+            human_scored_count: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    expect(screen.queryByText(/not answered yet/i)).toBeNull();
+  });
+
+  it("distinguishes an outcome scored zero from one never answered", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        total_responses: 10,
+        mean_score: 0,
+        outcomes: [
+          {
+            outcome_tag: "know-your-numbers",
+            mean_score: 0,
+            response_count: 10,
+            human_scored_count: 0,
+          },
+          {
+            outcome_tag: "sleep-hygiene",
+            mean_score: null,
+            response_count: 0,
+            human_scored_count: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // The zero keeps its row and its bar — it is a real result, and the sliver the
+    // fill's min-width leaves says "measured, and they got it wrong". The null gets
+    // prose. Collapsing the two would hide the finding this card exists to surface.
+    expect(outcomeRows().map((li) => li.textContent)).toEqual(["Know your numbers0%"]);
+    expect(screen.getByText(/not answered yet: sleep hygiene/i)).toBeInTheDocument();
+  });
+
+  it("a challenge with no responses says so, not a row of zeroes", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        total_responses: 0,
+        mean_score: null,
+        outcomes: [
+          {
+            outcome_tag: "know-your-numbers",
+            mean_score: null,
+            response_count: 0,
+            human_scored_count: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByText(/no assessment responses yet/i);
+
+    // Not "Not answered yet: everything" either — with nothing answered anywhere,
+    // that list is the whole card and says less than one sentence does.
+    expect(
+      screen.queryByRole("list", { name: /mean score by learning outcome/i }),
+    ).toBeNull();
+    expect(screen.queryByText(/not answered yet/i)).toBeNull();
+    expect(screen.queryByText(/NaN/)).toBeNull();
+  });
+
+  it("tells an untagged challenge apart from an unanswered one", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({ total_responses: 0, mean_score: null, outcomes: [] }),
+    );
+
+    render(<Reports />);
+
+    // No items at all is an authoring gap (US-12), not an engagement one, and the
+    // admin's next move differs: tag some questions vs. wait for answers.
+    expect(
+      await screen.findByText(/no assessment items tagged to an outcome yet/i),
+    ).toBeInTheDocument();
+  });
+
+  it("counts one response as a response, not responses", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        total_responses: 1,
+        mean_score: 1,
+        outcomes: [
+          {
+            outcome_tag: "know-your-numbers",
+            mean_score: 1,
+            response_count: 1,
+            human_scored_count: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+
+    expect(await screen.findByText(/1 response · 100% average/i)).toBeInTheDocument();
+  });
+
+  it("reads an admin's tag back in their own words", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        outcomes: [
+          {
+            outcome_tag: "Sexual health",
+            mean_score: 0.79,
+            response_count: 200,
+            human_scored_count: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // A tag that is not kebab-case passes through rather than being mangled: the
+    // label function separates and capitalizes, it does not rewrite.
+    expect(outcomeRows().map((li) => li.textContent)).toEqual(["Sexual health79%"]);
+  });
+
+  it("shows human-overridden scores without singling them out", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        total_human_scored: 40,
+        outcomes: [
+          {
+            outcome_tag: "know-your-numbers",
+            mean_score: 0.84,
+            response_count: 120,
+            human_scored_count: 40,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // US-24 scenario 2 at the surface: the overridden scores are in the mean and
+    // the count, which is what "included in the totals" means. The card draws no
+    // provenance badge — that is US-19's to add if it earns one.
+    expect(outcomeRows().map((li) => li.textContent)).toEqual(["Know your numbers84%"]);
+  });
+
+  it("refreshing picks up newly scored responses", async () => {
+    api.getLearningOutcomeReport
+      .mockResolvedValueOnce(asOutcomes())
+      .mockResolvedValue(
+        asOutcomes({
+          total_responses: 260,
+          mean_score: 0.86,
+          outcomes: [
+            {
+              outcome_tag: "know-your-numbers",
+              mean_score: 0.9,
+              response_count: 180,
+              human_scored_count: 0,
+            },
+            {
+              outcome_tag: "sleep-hygiene",
+              mean_score: null,
+              response_count: 0,
+              human_scored_count: 0,
+            },
+            {
+              outcome_tag: "stress-management",
+              mean_score: 0.79,
+              response_count: 80,
+              human_scored_count: 0,
+            },
+          ],
+        }),
+      );
+
+    render(<Reports />);
+    await screen.findByText(/200 responses · 82% average/i);
+
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    // Nothing is cached server-side, so a score earned a second ago is in the next
+    // refresh — the card just has to ask again.
+    expect(await screen.findByText(/260 responses · 86% average/i)).toBeInTheDocument();
+    expect(outcomeFills().map((el) => el.style.width)).toEqual(["90%", "79%"]);
+  });
+
+  it("is hidden when no challenge is published", async () => {
+    const notFound = new ApiError(404, "No active challenge");
+    api.getParticipationReport.mockRejectedValue(notFound);
+    api.getAttendanceReport.mockRejectedValue(notFound);
+    api.getEngagementReport.mockRejectedValue(notFound);
+    api.getLearningOutcomeReport.mockRejectedValue(notFound);
+
+    render(<Reports />);
+    await screen.findByText(/no published challenge yet/i);
+
+    expect(
+      screen.queryByRole("list", { name: /mean score by learning outcome/i }),
+    ).toBeNull();
+  });
+
+  it("a failed refresh keeps the outcomes already on screen", async () => {
+    api.getLearningOutcomeReport
+      .mockResolvedValueOnce(asOutcomes())
+      .mockRejectedValue(new ApiError(500, "boom"));
+
+    render(<Reports />);
+    await screen.findByText(/200 responses · 82% average/i);
+
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    // Stale numbers beat no numbers: the whole Promise.all failed, so every card
+    // keeps its last good read rather than blanking.
+    expect(screen.getByText(/200 responses · 82% average/i)).toBeInTheDocument();
+    expect(outcomeRows()).toHaveLength(2);
+  });
+});
+
 describe("Challenge selector (US-23 / FR-F3)", () => {
   it("offers no selector when there is only one published challenge", async () => {
     render(<Reports />);
@@ -756,18 +1136,19 @@ describe("Challenge selector (US-23 / FR-F3)", () => {
     expect(api.getEngagementReport).toHaveBeenCalledWith(undefined);
   });
 
-  it("moves all three cards to the challenge chosen", async () => {
+  it("moves all four cards to the challenge chosen", async () => {
     api.listChallenges.mockResolvedValue(TWO_CHALLENGES);
 
     render(<Reports />);
     await screen.findByRole("option", { name: /spring 2026/i });
     await userEvent.selectOptions(selector(), "2");
 
-    // The whole point of one selector rather than three: the cards can never end
+    // The whole point of one selector rather than four: the cards can never end
     // up describing different semesters.
     expect(api.getParticipationReport).toHaveBeenLastCalledWith(2);
     expect(api.getAttendanceReport).toHaveBeenLastCalledWith(2);
     expect(api.getEngagementReport).toHaveBeenLastCalledWith(2);
+    expect(api.getLearningOutcomeReport).toHaveBeenLastCalledWith(2);
   });
 
   it("shows the chosen challenge's numbers", async () => {
