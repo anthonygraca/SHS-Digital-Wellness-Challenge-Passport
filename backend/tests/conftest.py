@@ -20,6 +20,7 @@ from app.models.challenge import (  # noqa: F401  (register on Base.metadata)
     AssessmentItem,
     Challenge,
     CheckIn,
+    CheckInAudit,
     Task,
 )
 from app.models.student import Student  # noqa: F401  (register on Base.metadata)
