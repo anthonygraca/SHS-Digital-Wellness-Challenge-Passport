@@ -3,6 +3,7 @@ import type {
   ChallengeSummary,
   ChallengeCreate,
   ChallengeUpdate,
+  ChallengeDuplicate,
   Task,
   TaskCreate,
   TaskUpdate,
@@ -55,6 +56,17 @@ export function updateChallenge(
 
 export function publishChallenge(id: number): Promise<Challenge> {
   return request<Challenge>(`/${id}/publish`, { method: "POST" });
+}
+
+/** Deep-copy a challenge into a new draft (US-14). Returns the copy. */
+export function duplicateChallenge(
+  id: number,
+  data: ChallengeDuplicate = {},
+): Promise<Challenge> {
+  return request<Challenge>(`/${id}/duplicate`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }
 
 // ---------------------------------------------------------------------------

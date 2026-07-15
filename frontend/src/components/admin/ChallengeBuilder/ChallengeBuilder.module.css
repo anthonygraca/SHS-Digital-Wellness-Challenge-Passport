@@ -100,21 +100,46 @@
   font-size: 18px;
 }
 
-.challengeCard {
+/* The wrap owns the card surface so the actions row below reads as part of the
+   same card; the inner .challengeCard is just the open affordance. */
+.challengeCardWrap {
   background: var(--wp-surface-container);
   border-radius: 16px;
-  padding: 16px 18px;
   margin-bottom: 10px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+.challengeCardWrap:hover { border-color: var(--wp-outline); }
+
+.challengeCard {
+  padding: 16px 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   cursor: pointer;
-  border: 1px solid transparent;
-  transition: border-color 0.15s;
+  border-radius: 16px 16px 0 0;
 }
-.challengeCard:hover { border-color: var(--wp-outline); }
-.challengeCard:focus-visible { outline: 3px solid var(--wp-primary); border-radius: 16px; }
+.challengeCard:focus-visible {
+  outline: 3px solid var(--wp-primary);
+  outline-offset: -3px;
+  border-radius: 16px 16px 0 0;
+}
+
+/* Full-width row on a phone rather than crowding the badge row. */
+.challengeCardActions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 18px 12px;
+  border-top: 1px solid var(--wp-outline-variant);
+}
+
+/* .btnSecondary is 40px tall; challenge cards are a primary touch surface, so
+   these meet the 44px minimum without resizing every button in the builder. */
+.cardAction {
+  min-height: 44px;
+  min-width: 44px;
+}
 
 .challengeCardInfo h3 {
   margin: 0 0 4px;

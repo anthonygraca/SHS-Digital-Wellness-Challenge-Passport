@@ -192,6 +192,19 @@ class ChallengeUpdate(BaseModel):
     theme_id: str | None = None
 
 
+class ChallengeDuplicate(BaseModel):
+    """Optional overrides for the copy (FR-B6).
+
+    Both fields are optional so a bare ``POST .../duplicate`` works: the server
+    derives a unique "<name> (Copy)" and reuses the original's semester. The
+    admin UI supplies both so the copy lands on the semester it is being
+    authored for.
+    """
+
+    name: str | None = None
+    semester: str | None = None
+
+
 class ChallengeOut(BaseModel):
     id: int
     campus_id: str
