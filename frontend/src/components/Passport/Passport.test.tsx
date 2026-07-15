@@ -91,12 +91,14 @@ const asSession = (over: Partial<Session>): Session => ({
   subject: "abc@csub.edu",
   affiliation: "student",
   isCurrentStudent: true,
+  student_id: 1,
   ...over,
 });
 
 function week(weekNo: number, status: WeekStatus, required = true) {
   return {
     weekNo,
+    taskId: weekNo, // Map weekNo to taskId for tests
     title: `Week ${weekNo} Portal`,
     caption: "Themed caption for the week.",
     activityType: "Screening",

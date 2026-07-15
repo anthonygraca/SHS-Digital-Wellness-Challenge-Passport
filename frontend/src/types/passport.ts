@@ -2,6 +2,7 @@ export type WeekStatus = "locked" | "available" | "complete";
 
 export interface PassportWeek {
   weekNo: number;
+  taskId: number; // Added for US-15: task ID for check-in endpoint
   title: string;
   caption: string;
   activityType: string;
@@ -20,6 +21,8 @@ export interface PassportWeek {
  */
 export interface ThemeConfig {
   id: string;
+  name?: string; // US-16: Theme name for display
+  personaName?: string; // US-16: Wellness guide persona name
   /** CSS custom-property suffix -> value; applied as `--wp-<key>`. */
   palette: Record<string, string>;
   logoUrl: string | null;

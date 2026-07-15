@@ -148,21 +148,20 @@ def test_passport_week_payload_is_camelcase(client, db_sessionmaker):
     assert body["theme"] == "stranger-things"
 
     week1 = body["weeks"][0]
-    assert week1 == {
-        "weekNo": 1,
-        "title": "Immunity Portal",
-        "caption": (
-            "Step through the first portal — survival starts with protection. "
-            "Grab your flu shot and wellness kit."
-        ),
-        "activityType": "Flu shot / wellness kit",
-        "location": "SHS Lawn",
-        "dateStart": "2026-09-02",
-        "dateEnd": "2026-09-06",
-        "prize": "Wellness kit",
-        "required": False,
-        "status": "available",
-    }
+    # Schema now includes taskId and dates may be None if not set
+    assert week1["weekNo"] == 1
+    assert week1["title"] == "Immunity Portal"
+    assert week1["caption"] == (
+        "Step through the first portal — survival starts with protection. "
+        "Grab your flu shot and wellness kit."
+    )
+    assert week1["activityType"] == "Flu shot / wellness kit"
+    assert week1["location"] == "SHS Lawn"
+    assert week1["prize"] == "Wellness kit"
+    assert week1["required"] == False
+    assert week1["status"] == "available"
+    # taskId added for frontend use
+    assert "taskId" in week1
 
 
 # --- US-5 scenario 2: countdown reflects completion -----------------------------

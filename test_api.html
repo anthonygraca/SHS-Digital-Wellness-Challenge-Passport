@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test US-15 API</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+        button { padding: 10px 20px; margin: 10px; cursor: pointer; }
+        pre { background: #2d2d2d; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        .success { color: #4ec9b0; }
+        .error { color: #f48771; }
+    </style>
+</head>
+<body>
+    <h1>US-15 API Test Page</h1>
+    
+    <h2>Step 1: Check Passport Data</h2>
+    <button onclick="testPassport()">Test GET /api/passport</button>
+    <pre id="passport-result"></pre>
+
+    <h2>Step 2: Check In to Task</h2>
+    <label>Task ID: <input type="number" id="taskId" value="1" /></label>
+    <button onclick="testCheckIn()">Test POST /api/checkins-v2/</button>
+    <pre id="checkin-result"></pre>
+
+    <script>
+        async function testPassport() {
+            const output = document.getElementById('passport-result');
+            output.innerHTML = 'Loading...';
+            
+            try {
+                const res = await fetch('/api/passport', { credentials: 'include' });
+                const data = await res.json();
+                
+                output.innerHTML = `<div class="success">✅ Success! Status: ${res.status}</div>\n`;
+                output.innerHTML += JSON.stringify(data, null, 2);
+                
+                // Check if taskId exists
+                if (data.weeks && data.weeks.length > 0) {
+                    const firstWeek = data.weeks[0];
+                    if (firstWeek.taskId) {
+                        output.innerHTML += `\n\n<div class="success">✅ taskId found: ${firstWeek.taskId}</div>`;
+                        document.getElementById('taskId').value = firstWeek.taskId;
+                    } else {
+                        output.innerHTML += '\n\n<div class="error">❌ taskId is missing! Backend needs restart.</div>';
+                    }
+                }
+            } catch (err) {
+                output.innerHTML = `<div class="error">❌ Error: ${err.message}</div>`;
+            }
+        }
+
+        async function testCheckIn() {
+            const output = document.getElementById('checkin-result');
+            const taskId = parseInt(document.getElementById('taskId').value);
+            output.innerHTML = 'Loading...';
+            
+            try {
+                const res = await fetch('/api/checkins-v2/', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_id: taskId, method: 'manual' })
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    output.innerHTML = `<div class="success">✅ Success! Status: ${res.status}</div>\n`;
+                    output.innerHTML += JSON.stringify(data, null, 2);
+                    
+                    if (data.personalized_tip) {
+                        output.innerHTML += `\n\n<div class="success">✅ Personalized Tip Received!</div>`;
+                        output.innerHTML += `\n\nTip: ${data.personalized_tip.tip}`;
+                        output.innerHTML += `\n\nResource: ${data.personalized_tip.resource}`;
+                        output.innerHTML += `\n\nNext Step: ${data.personalized_tip.next_step}`;
+                    }
+                } else {
+                    output.innerHTML = `<div class="error">❌ Error ${res.status}: ${data.detail || 'Unknown error'}</div>`;
+                    output.innerHTML += '\n\n' + JSON.stringify(data, null, 2);
+                }
+            } catch (err) {
+                output.innerHTML = `<div class="error">❌ Error: ${err.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -10,9 +10,14 @@ _ALG = "HS256"
 
 
 def mint_session_token(
-    *, sso_subject: str, affiliation: str, campus_id: str, student_id: int
+    *,
+    sso_subject: str,
+    affiliation: str,
+    campus_id: str,
+    student_id: int,
+    role: str,
 ) -> str:
-    """Issue a short-lived session JWT. Claims carry no PHI."""
+    """Issue a short-lived session JWT. Claims carry no PHI, but include role for RBAC."""
     settings = get_settings()
     now = datetime.now(timezone.utc)
     payload = {
@@ -20,6 +25,7 @@ def mint_session_token(
         "affiliation": affiliation,
         "campus_id": campus_id,
         "student_id": student_id,
+        "role": role,
         "iat": now,
         "exp": now + timedelta(seconds=settings.jwt_ttl_seconds),
     }

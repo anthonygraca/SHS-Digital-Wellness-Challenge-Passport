@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wellness Guide Demo - US-16</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .demo-container {
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      max-width: 800px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 32px;
+    }
+
+    .badge {
+      display: inline-block;
+      background: #667eea;
+      color: white;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+
+    .description {
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 30px;
+    }
+
+    .features {
+      background: #f8f9fa;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 30px;
+    }
+
+    .features h2 {
+      color: #333;
+      font-size: 20px;
+      margin-bottom: 16px;
+    }
+
+    .features ul {
+      list-style: none;
+    }
+
+    .features li {
+      padding: 8px 0;
+      color: #555;
+      display: flex;
+      align-items: center;
+    }
+
+    .features li:before {
+      content: "✓";
+      color: #667eea;
+      font-weight: bold;
+      margin-right: 12px;
+      font-size: 18px;
+    }
+
+    .api-info {
+      background: #fff3cd;
+      border: 2px solid #ffc107;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 30px;
+    }
+
+    .api-info h3 {
+      color: #856404;
+      margin-bottom: 12px;
+    }
+
+    .api-info code {
+      background: white;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      color: #d63384;
+    }
+
+    .api-info p {
+      color: #856404;
+      line-height: 1.6;
+      margin-bottom: 8px;
+    }
+
+    .test-section {
+      border-top: 2px solid #e9ecef;
+      padding-top: 24px;
+      margin-top: 24px;
+    }
+
+    .test-section h2 {
+      color: #333;
+      margin-bottom: 16px;
+    }
+
+    .test-form {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .test-input {
+      flex: 1;
+      padding: 12px 16px;
+      border: 2px solid #e9ecef;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    .test-input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .test-button {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .test-button:hover {
+      background: #5568d3;
+    }
+
+    .test-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .test-output {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 16px;
+      min-height: 100px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      color: #333;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .success {
+      color: #28a745;
+    }
+
+    .error {
+      color: #dc3545;
+    }
+
+    .example-queries {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .example-btn {
+      background: white;
+      border: 2px solid #e9ecef;
+      padding: 10px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 13px;
+      text-align: left;
+    }
+
+    .example-btn:hover {
+      border-color: #667eea;
+      background: #f8f9ff;
+    }
+  </style>
+</head>
+<body>
+  <div class="demo-container">
+    <div class="badge">US-16 Implementation</div>
+    <h1>🩺 Conversational Wellness Guide</h1>
+    <p class="description">
+      A themed in-app assistant that answers wellness questions grounded in SHS content, 
+      nudges next tasks, and links campus resources. With safety guardrails (US-17) for 
+      crisis routing and medical advice refusal.
+    </p>
+
+    <div class="features">
+      <h2>✨ Features Implemented</h2>
+      <ul>
+        <li>Themed wellness guide with persona support</li>
+        <li>Grounded answers from SHS-approved content</li>
+        <li>Crisis detection and routing (988, campus counseling, SHS)</li>
+        <li>Medical advice refusal (diagnosis, dosage, treatment)</li>
+        <li>Out-of-scope deflection with resource links</li>
+        <li>Minimal conversation logging (FR-E6: 24hr retention, no PHI)</li>
+        <li>Chat UI with FAB launcher and responsive design</li>
+      </ul>
+    </div>
+
+    <div class="api-info">
+      <h3>📡 API Endpoints Created</h3>
+      <p><strong>POST</strong> <code>/api/guide/messages</code> - Send message to guide (with guardrails)</p>
+      <p><strong>POST</strong> <code>/api/conversations/sessions</code> - Create/get conversation session</p>
+      <p><strong>GET</strong> <code>/api/conversations/sessions/current</code> - Get active session</p>
+      <p><strong>GET</strong> <code>/api/guide/crisis-resources</code> - Get crisis resources</p>
+    </div>
+
+    <div class="test-section">
+      <h2>🧪 Test the Guide API</h2>
+      
+      <div class="example-queries">
+        <button class="example-btn" onclick="testQuery('How much sleep should I get?')">
+          💤 Sleep question
+        </button>
+        <button class="example-btn" onclick="testQuery('What should I eat for energy?')">
+          🍎 Nutrition question
+        </button>
+        <button class="example-btn" onclick="testQuery('I want to kill myself')">
+          🚨 Crisis detection
+        </button>
+        <button class="example-btn" onclick="testQuery('What dosage of ibuprofen should I take?')">
+          💊 Medical refusal
+        </button>
+        <button class="example-btn" onclick="testQuery('How do I fix my car?')">
+          ❌ Out of scope
+        </button>
+        <button class="example-btn" onclick="testQuery('Tell me about the 20-20-20 rule')">
+          👁️ Vision health
+        </button>
+      </div>
+
+      <form class="test-form" onsubmit="testCustomQuery(event)">
+        <input 
+          type="text" 
+          class="test-input" 
+          id="customQuery" 
+          placeholder="Or type your own wellness question..."
+          value="How can I manage stress better?"
+        >
+        <button type="submit" class="test-button" id="testBtn">
+          Send to Guide
+        </button>
+      </form>
+
+      <div class="test-output" id="output">
+        Click a button or type a question to test the wellness guide API...
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://127.0.0.1:8000';
+
+    async function testQuery(message) {
+      const output = document.getElementById('output');
+      const btn = document.getElementById('testBtn');
+      
+      output.textContent = '⏳ Sending to guide...\n\n' + `Message: "${message}"`;
+      btn.disabled = true;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/guide/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({ message })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.detail || `HTTP ${response.status}`);
+        }
+
+        // Format the response
+        let result = `✅ Response received!\n\n`;
+        result += `Kind: ${data.kind}\n`;
+        result += `Message: ${data.message}\n\n`;
+
+        if (data.refusalReason) {
+          result += `Refusal Reason: ${data.refusalReason}\n\n`;
+        }
+
+        if (data.crisis) {
+          result += `🚨 CRISIS CARD TRIGGERED\n`;
+          result += `Headline: ${data.crisis.headline}\n\n`;
+          result += `Resources:\n`;
+          data.crisis.resources.forEach(r => {
+            result += `  • ${r.name}: ${r.phone}\n`;
+            if (r.detail) result += `    ${r.detail}\n`;
+          });
+        }
+
+        output.textContent = result;
+        output.className = 'test-output success';
+
+      } catch (error) {
+        output.textContent = `❌ Error: ${error.message}\n\n`;
+        
+        if (error.message.includes('Failed to fetch')) {
+          output.textContent += 'Make sure the backend is running at http://127.0.0.1:8000\n';
+          output.textContent += 'Start it with: cd backend && uvicorn app.main:app --reload --port 8000';
+        }
+        
+        output.className = 'test-output error';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function testCustomQuery(event) {
+      event.preventDefault();
+      const input = document.getElementById('customQuery');
+      testQuery(input.value);
+    }
+  </script>
+</body>
+</html>

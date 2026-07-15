@@ -38,8 +38,9 @@ def test_first_time_creates_minimal_record(client, db_sessionmaker):
 
 def test_student_table_stores_only_opaque_identity(db_sessionmaker):
     # FR-A2 enforced at the schema: no name, no 9-digit ID, no password columns.
+    # FR-A4: role column added for access control (US-4)
     columns = set(Student.__table__.columns.keys())
-    assert columns == {"id", "campus_id", "sso_subject", "affiliation", "created_at"}
+    assert columns == {"id", "campus_id", "sso_subject", "affiliation", "role", "created_at"}
     forbidden = {"name", "password", "student_id_number", "ssn", "dob"}
     assert columns.isdisjoint(forbidden)
 
@@ -98,8 +99,11 @@ def test_session_requires_auth_then_returns_identity(client):
     me = client.get("/auth/session")
     assert me.status_code == 200
     body = me.json()
+    # US-4 adds role and student_id to session response
     assert body == {
         "subject": "abc@csub.edu",
         "affiliation": "student",
         "isCurrentStudent": True,
+        "role": "student",
+        "student_id": 1,
     }
