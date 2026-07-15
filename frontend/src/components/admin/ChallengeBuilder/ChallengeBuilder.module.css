@@ -518,6 +518,64 @@
   margin-top: 2px;
 }
 
+/* ── Score override (FR-E5) ───────────────────────────────────── */
+
+/* Stacked, so two buttons on a narrow row never squeeze each other's label. */
+.itemActions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.responseText {
+  margin: 6px 0 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--wp-on-surface);
+  white-space: pre-wrap;
+  /* A reflection runs to 4000 characters and may hold a pasted string with no spaces,
+     which would otherwise widen the row past the modal. */
+  overflow-wrap: anywhere;
+}
+
+.scoreEditor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.scoreLabel {
+  font-size: 11px;
+  color: var(--wp-on-surface-variant);
+}
+
+.scoreInput {
+  width: 76px;
+  padding: 6px 8px;
+  border: 1px solid var(--wp-outline-variant);
+  border-radius: 8px;
+  background: var(--wp-surface);
+  color: var(--wp-on-surface);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scoreValue {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--wp-on-surface);
+}
+
+/* A hand-set score is worth spotting in a list of machine ones — it is the row an
+   admin is looking for when they come back. */
+.methodBadge[data-scored-by="human"] {
+  background: color-mix(in srgb, var(--wp-primary) 16%, transparent);
+  color: var(--wp-primary);
+}
+
 /* ── Assessment item form ─────────────────────────────────────── */
 .itemForm {
   border-top: 1px solid var(--wp-outline-variant);
