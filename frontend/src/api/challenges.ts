@@ -7,6 +7,9 @@ import type {
   TaskCreate,
   TaskUpdate,
   TaskReorder,
+  AssessmentItem,
+  AssessmentItemCreate,
+  AssessmentItemUpdate,
 } from "../types/challenge";
 
 const BASE = (import.meta.env.VITE_API_BASE ?? "") + "/api/challenges";
@@ -108,4 +111,52 @@ export function reorderTasks(
     method: "PUT",
     body: JSON.stringify(data),
   });
+}
+
+
+// ---------------------------------------------------------------------------
+// Assessment items (FR-B3 / US-12)
+// ---------------------------------------------------------------------------
+
+export function listAssessmentItems(
+  challengeId: number,
+  taskId: number,
+): Promise<AssessmentItem[]> {
+  return request<AssessmentItem[]>(
+    `/${challengeId}/tasks/${taskId}/items`,
+  );
+}
+
+export function addAssessmentItem(
+  challengeId: number,
+  taskId: number,
+  data: AssessmentItemCreate,
+): Promise<AssessmentItem> {
+  return request<AssessmentItem>(
+    `/${challengeId}/tasks/${taskId}/items`,
+    { method: "POST", body: JSON.stringify(data) },
+  );
+}
+
+export function updateAssessmentItem(
+  challengeId: number,
+  taskId: number,
+  itemId: number,
+  data: AssessmentItemUpdate,
+): Promise<AssessmentItem> {
+  return request<AssessmentItem>(
+    `/${challengeId}/tasks/${taskId}/items/${itemId}`,
+    { method: "PATCH", body: JSON.stringify(data) },
+  );
+}
+
+export function deleteAssessmentItem(
+  challengeId: number,
+  taskId: number,
+  itemId: number,
+): Promise<void> {
+  return request<void>(
+    `/${challengeId}/tasks/${taskId}/items/${itemId}`,
+    { method: "DELETE" },
+  );
 }

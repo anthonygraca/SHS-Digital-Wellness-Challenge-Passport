@@ -10,6 +10,7 @@ export interface Task {
   date_window_end: string | null;
   prize: string;
   required: boolean;
+  assessment_items: AssessmentItem[];
   created_at: string;
   updated_at: string;
 }
@@ -78,4 +79,47 @@ export interface TaskUpdate {
 
 export interface TaskReorder {
   task_ids: number[];
+}
+
+
+// ---------------------------------------------------------------------------
+// Assessment items (FR-B3 / US-12)
+// ---------------------------------------------------------------------------
+
+export interface AssessmentItem {
+  id: number;
+  task_id: number;
+  item_type: "mcq" | "reflection";
+  prompt: string;
+  outcome_tag: string;
+  options: string[] | null;
+  answer_key: string | null;
+  rubric: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MCQCreate {
+  item_type: "mcq";
+  prompt: string;
+  outcome_tag: string;
+  options: string[];
+  answer_key: string;
+}
+
+export interface ReflectionCreate {
+  item_type: "reflection";
+  prompt: string;
+  outcome_tag: string;
+  rubric: string;
+}
+
+export type AssessmentItemCreate = MCQCreate | ReflectionCreate;
+
+export interface AssessmentItemUpdate {
+  prompt?: string;
+  outcome_tag?: string;
+  options?: string[];
+  answer_key?: string;
+  rubric?: string;
 }

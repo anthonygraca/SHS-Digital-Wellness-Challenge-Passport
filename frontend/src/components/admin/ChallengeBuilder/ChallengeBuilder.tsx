@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "../../../auth/SessionProvider";
 import * as api from "../../../api/challenges";
-import type { Challenge, ChallengeSummary, Task } from "../../../types/challenge";
+import type {
+  AssessmentItem,
+  Challenge,
+  ChallengeSummary,
+  Task,
+} from "../../../types/challenge";
 import styles from "./ChallengeBuilder.module.css";
 
 // ---------------------------------------------------------------------------
@@ -116,6 +121,7 @@ function ChallengeDetail({
   const [editChallenge, setEditChallenge] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [itemsTask, setItemsTask] = useState<Task | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -203,6 +209,7 @@ function ChallengeDetail({
           onEdit={setEditingTask}
           onDelete={(taskId) => void handleDeleteTask(taskId)}
           onReorder={handleReorder}
+          onManageItems={setItemsTask}
         />
 
         <button
@@ -239,6 +246,14 @@ function ChallengeDetail({
           onSaved={() => { setEditingTask(null); void load(); }}
         />
       )}
+
+      {itemsTask && (
+        <AssessmentItemsPanel
+          challengeId={challenge.id}
+          task={itemsTask}
+          onClose={() => { setItemsTask(null); void load(); }}
+        />
+      )}
     </>
   );
 }
@@ -252,11 +267,13 @@ function TaskList({
   onEdit,
   onDelete,
   onReorder,
+  onManageItems,
 }: {
   tasks: Task[];
   onEdit: (t: Task) => void;
   onDelete: (id: number) => void;
   onReorder: (ids: number[]) => Promise<void>;
+  onManageItems: (t: Task) => void;
 }) {
   const dragSrc = useRef<number | null>(null); // index being dragged
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
@@ -346,6 +363,14 @@ function TaskList({
           </div>
 
           <div className={styles.taskActions}>
+            <button
+              type="button"
+              className={styles.btnGhost}
+              onClick={() => onManageItems(task)}
+              aria-label={`Assessment items for ${task.title}`}
+            >
+              Items ({task.assessment_items?.length ?? 0})
+            </button>
             <button
               type="button"
               className={styles.btnGhost}
@@ -631,6 +656,336 @@ function TaskFormModal({
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Assessment items panel (FR-B3 / US-12)
+// ---------------------------------------------------------------------------
+
+function AssessmentItemsPanel({
+  challengeId,
+  task,
+  onClose,
+}: {
+  challengeId: number;
+  task: Task;
+  onClose: () => void;
+}) {
+  const [items, setItems] = useState<AssessmentItem[]>(
+    task.assessment_items ?? [],
+  );
+  const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleDelete(itemId: number) {
+    try {
+      await api.deleteAssessmentItem(challengeId, task.id, itemId);
+      setItems((prev) => prev.filter((i) => i.id !== itemId));
+    } catch (err) {
+      setError(
+        err instanceof api.ApiError ? err.message : "Delete failed",
+      );
+    }
+  }
+
+  function handleAdded(item: AssessmentItem) {
+    setItems((prev) => [...prev, item]);
+    setShowForm(false);
+  }
+
+  return (
+    <div
+      className={styles.overlay}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Assessment items for ${task.title}`}
+    >
+      <div className={`${styles.modal} ${styles.modalWide}`}>
+        <h2>Assessment items — {task.title}</h2>
+        {error && <p className={styles.error}>{error}</p>}
+
+        {items.length === 0 && !showForm && (
+          <p className={styles.empty}>
+            No assessment items yet. Add an MCQ or reflection.
+          </p>
+        )}
+
+        {items.length > 0 && (
+          <ul className={styles.itemList} aria-label="Assessment items">
+            {items.map((item) => (
+              <li key={item.id} className={styles.assessmentItem}>
+                <div className={styles.itemBody}>
+                  <span className={styles.itemTypeBadge}>
+                    {item.item_type === "mcq" ? "MCQ" : "Reflection"}
+                  </span>
+                  <span className={styles.outcomeBadge}>
+                    {item.outcome_tag}
+                  </span>
+                  <p className={styles.itemPrompt}>{item.prompt}</p>
+                  {item.item_type === "mcq" && item.options && (
+                    <div className={styles.itemMeta}>
+                      Options: {item.options.join(", ")} · Answer:{" "}
+                      <strong>{item.answer_key}</strong>
+                    </div>
+                  )}
+                  {item.item_type === "reflection" && item.rubric && (
+                    <div className={styles.itemMeta}>
+                      Rubric: {item.rubric}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className={styles.btnDanger}
+                  onClick={() => void handleDelete(item.id)}
+                  aria-label={`Delete assessment item: ${item.prompt.slice(0, 30)}`}
+                >
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {showForm && (
+          <AssessmentItemFormModal
+            challengeId={challengeId}
+            taskId={task.id}
+            onCancel={() => setShowForm(false)}
+            onSaved={handleAdded}
+          />
+        )}
+
+        <div className={styles.formActions}>
+          {!showForm && (
+            <button
+              type="button"
+              className={styles.btnSecondary}
+              onClick={() => setShowForm(true)}
+            >
+              + Add item
+            </button>
+          )}
+          <button
+            type="button"
+            className={styles.btnPrimary}
+            onClick={onClose}
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Assessment item form (inline in panel)
+// ---------------------------------------------------------------------------
+
+function AssessmentItemFormModal({
+  challengeId,
+  taskId,
+  onCancel,
+  onSaved,
+}: {
+  challengeId: number;
+  taskId: number;
+  onCancel: () => void;
+  onSaved: (item: AssessmentItem) => void;
+}) {
+  const [itemType, setItemType] = useState<"mcq" | "reflection">("mcq");
+  const [prompt, setPrompt] = useState("");
+  const [outcomeTag, setOutcomeTag] = useState("");
+  // MCQ
+  const [options, setOptions] = useState(["", ""]);
+  const [answerKey, setAnswerKey] = useState("");
+  // Reflection
+  const [rubric, setRubric] = useState("");
+
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  function addOption() {
+    setOptions((prev) => [...prev, ""]);
+  }
+
+  function updateOption(idx: number, value: string) {
+    setOptions((prev) => prev.map((o, i) => (i === idx ? value : o)));
+  }
+
+  function removeOption(idx: number) {
+    if (options.length <= 2) return;
+    setOptions((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSaving(true);
+    try {
+      let item: AssessmentItem;
+      if (itemType === "mcq") {
+        const cleaned = options.map((o) => o.trim()).filter(Boolean);
+        if (cleaned.length < 2) {
+          setError("At least 2 non-empty options are required");
+          setSaving(false);
+          return;
+        }
+        if (!cleaned.includes(answerKey.trim())) {
+          setError("Answer key must match one of the options");
+          setSaving(false);
+          return;
+        }
+        item = await api.addAssessmentItem(challengeId, taskId, {
+          item_type: "mcq",
+          prompt,
+          outcome_tag: outcomeTag,
+          options: cleaned,
+          answer_key: answerKey.trim(),
+        });
+      } else {
+        item = await api.addAssessmentItem(challengeId, taskId, {
+          item_type: "reflection",
+          prompt,
+          outcome_tag: outcomeTag,
+          rubric,
+        });
+      }
+      onSaved(item);
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className={styles.itemForm}>
+      <h3>New {itemType === "mcq" ? "MCQ" : "Reflection"}</h3>
+      {error && <p className={styles.error}>{error}</p>}
+      <form onSubmit={(e) => void handleSubmit(e)}>
+        <div className={styles.fieldGroup}>
+          <label htmlFor="ai-type">Item type</label>
+          <select
+            id="ai-type"
+            value={itemType}
+            onChange={(e) =>
+              setItemType(e.target.value as "mcq" | "reflection")
+            }
+          >
+            <option value="mcq">Multiple choice (MCQ)</option>
+            <option value="reflection">Reflection</option>
+          </select>
+        </div>
+        <div className={styles.fieldGroup}>
+          <label htmlFor="ai-prompt">Prompt</label>
+          <textarea
+            id="ai-prompt"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            required
+            placeholder="Question or reflection prompt shown to students"
+          />
+        </div>
+        <div className={styles.fieldGroup}>
+          <label htmlFor="ai-outcome">Learning outcome tag</label>
+          <input
+            id="ai-outcome"
+            type="text"
+            value={outcomeTag}
+            onChange={(e) => setOutcomeTag(e.target.value)}
+            required
+            placeholder="e.g. sleep-hygiene, nutrition, mental-health"
+          />
+        </div>
+
+        {itemType === "mcq" && (
+          <>
+            <div className={styles.fieldGroup}>
+              <label>Options (min 2)</label>
+              {options.map((opt, idx) => (
+                <div key={idx} className={styles.optionRow}>
+                  <input
+                    type="text"
+                    value={opt}
+                    onChange={(e) => updateOption(idx, e.target.value)}
+                    placeholder={`Option ${idx + 1}`}
+                    required
+                  />
+                  {options.length > 2 && (
+                    <button
+                      type="button"
+                      className={styles.btnDanger}
+                      onClick={() => removeOption(idx)}
+                      aria-label={`Remove option ${idx + 1}`}
+                    >
+                      x
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                className={styles.btnGhost}
+                onClick={addOption}
+              >
+                + Add option
+              </button>
+            </div>
+            <div className={styles.fieldGroup}>
+              <label htmlFor="ai-answer">Answer key</label>
+              <select
+                id="ai-answer"
+                value={answerKey}
+                onChange={(e) => setAnswerKey(e.target.value)}
+                required
+              >
+                <option value="">— select correct answer —</option>
+                {options
+                  .filter((o) => o.trim() !== "")
+                  .map((o) => (
+                    <option key={o} value={o.trim()}>
+                      {o.trim()}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </>
+        )}
+
+        {itemType === "reflection" && (
+          <div className={styles.fieldGroup}>
+            <label htmlFor="ai-rubric">Rubric</label>
+            <textarea
+              id="ai-rubric"
+              value={rubric}
+              onChange={(e) => setRubric(e.target.value)}
+              required
+              placeholder="Scoring criteria, e.g. 1 – vague; 2 – specific; 3 – actionable"
+            />
+          </div>
+        )}
+
+        <div className={styles.formActions}>
+          <button
+            type="button"
+            className={styles.btnSecondary}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className={styles.btnPrimary}
+            disabled={saving}
+          >
+            {saving ? "Saving…" : "Add item"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
