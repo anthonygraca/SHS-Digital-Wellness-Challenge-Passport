@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { QRCodeSVG } from "qrcode.react";
+import { useNavigate } from "react-router-dom";
 import { useSession } from "../../../auth/SessionProvider";
 import * as api from "../../../api/challenges";
 import * as themeApi from "../../../api/themes";
@@ -121,6 +121,7 @@ function ChallengeDetail({
   id: number;
   onBack: () => void;
 }) {
+  const navigate = useNavigate();
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [loading, setLoading] = useState(true);
   const [editChallenge, setEditChallenge] = useState(false);
@@ -242,6 +243,7 @@ function ChallengeDetail({
           onReorder={handleReorder}
           onManageItems={setItemsTask}
           onManageCheckins={setCheckinsTask}
+          onLive={(t) => navigate(`/admin/live/${challenge.id}/${t.id}`)}
         />
 
         <button
@@ -317,6 +319,7 @@ function TaskList({
   onReorder,
   onManageItems,
   onManageCheckins,
+  onLive,
 }: {
   tasks: Task[];
   onEdit: (t: Task) => void;
@@ -324,6 +327,7 @@ function TaskList({
   onReorder: (ids: number[]) => Promise<void>;
   onManageItems: (t: Task) => void;
   onManageCheckins: (t: Task) => void;
+  onLive: (t: Task) => void;
 }) {
   const dragSrc = useRef<number | null>(null); // index being dragged
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
@@ -411,18 +415,17 @@ function TaskList({
               </p>
             )}
 
-            {task.qr_token && (
-              <div
-                className={styles.taskQr}
-                aria-label={`Event check-in QR for ${task.title}`}
-              >
-                <QRCodeSVG value={task.qr_token} size={112} marginSize={2} />
-                <span className={styles.taskQrCaption}>Scan to check in</span>
-              </div>
-            )}
           </div>
 
           <div className={styles.taskActions}>
+            <button
+              type="button"
+              className={styles.btnGhost}
+              onClick={() => onLive(task)}
+              aria-label={`Open the live event dashboard for ${task.title}`}
+            >
+              Live
+            </button>
             <button
               type="button"
               className={styles.btnGhost}
@@ -1320,8 +1323,11 @@ function fmtTs(ts: string) {
  * Fetches on mount rather than reading off the task (as AssessmentItemsPanel
  * does): TaskOut deliberately carries no check-ins array, since that would be an
  * unbounded per-task payload on every builder load.
+ *
+ * Exported for the live event dashboard (US-28), whose Manual override button
+ * opens this same panel.
  */
-function CompletionOverridePanel({
+export function CompletionOverridePanel({
   challengeId,
   task,
   onClose,

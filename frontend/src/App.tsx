@@ -8,6 +8,7 @@ import { Landing } from "./components/Landing/Landing";
 import { Passport } from "./components/Passport/Passport";
 import { AuthCallback } from "./components/AuthCallback/AuthCallback";
 import { ChallengeBuilder } from "./components/admin/ChallengeBuilder/ChallengeBuilder";
+import { LiveOps } from "./components/admin/LiveOps/LiveOps";
 
 /** Sign-in route: if already authenticated, skip straight to the passport. */
 function SignInRoute() {
@@ -41,6 +42,14 @@ export function App() {
               element={
                 <AdminRoute>
                   <ChallengeBuilder />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/live/:challengeId/:taskId"
+              element={
+                <AdminRoute>
+                  <LiveOps />
                 </AdminRoute>
               }
             />

@@ -46,6 +46,21 @@ export function CheckCircleIcon({ size = 20 }: { size?: number }) {
   );
 }
 
+export function SensorsIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M7.76 16.24 6.35 17.65A7.98 7.98 0 0 1 4 12c0-2.21.9-4.21 2.35-5.65l1.41 1.41A5.98 5.98 0 0 0 6 12c0 1.66.67 3.16 1.76 4.24zm8.48 0A5.98 5.98 0 0 0 18 12c0-1.66-.67-3.16-1.76-4.24l1.41-1.41A7.98 7.98 0 0 1 20 12c0 2.21-.9 4.21-2.35 5.65l-1.41-1.41zM12 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM3.51 20.49A11.96 11.96 0 0 1 0 12c0-3.31 1.34-6.31 3.51-8.49l1.42 1.42A9.97 9.97 0 0 0 2 12c0 2.76 1.12 5.26 2.93 7.07l-1.42 1.42zm16.98 0-1.42-1.42A9.97 9.97 0 0 0 22 12c0-2.76-1.12-5.26-2.93-7.07l1.42-1.42A11.96 11.96 0 0 1 24 12c0 3.31-1.34 6.31-3.51 8.49z" />
+    </svg>
+  );
+}
+
 export function BoltIcon({ size = 20 }: { size?: number }) {
   return (
     <svg
