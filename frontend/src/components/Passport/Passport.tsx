@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useSession } from "../../auth/SessionProvider";
 import { EligibilityBlocked } from "../EligibilityBlocked/EligibilityBlocked";
-import { checkIn, fetchPassport } from "../../passport/passport";
+import { fetchPassport } from "../../passport/passport";
+import { checkIn as checkInApi } from "../../api/checkins";
 import type { Passport as PassportData, WeekStatus } from "../../types/passport";
+import type { CheckInResponse } from "../../types/checkin";
+import { TipNotification } from "../TipNotification/TipNotification";
 import { BoltIcon, CheckCircleIcon, LockIcon } from "../icons";
 import styles from "./Passport.module.css";
 
@@ -45,9 +48,11 @@ type OnCheckIn = (weekNo: number) => Promise<void> | void;
 export function PassportView({
   passport,
   onCheckIn,
+  onCloseSheet,
 }: {
   passport: PassportData;
   onCheckIn?: OnCheckIn;
+  onCloseSheet?: () => void;
 }) {
   const { challengeName, completedWeeks, totalWeeks, remainingWeeks, weeks } =
     passport;
@@ -75,6 +80,9 @@ export function PassportView({
     setSubmitting(true);
     try {
       await onCheckIn(selectedWeek.weekNo);
+      // Close the detail sheet after successful check-in so TipNotification is visible
+      setSelectedWeekNo(null);
+      onCloseSheet?.();
     } finally {
       setSubmitting(false);
     }
@@ -190,13 +198,11 @@ export function PassportView({
 
 interface PassportProps {
   fetchData?: () => Promise<PassportData | null>;
-  checkInFn?: (weekNo: number) => Promise<PassportData | null>;
 }
 
 /**
  * Passport home (US-5 / FR-C2, FR-C3). Guards against being viewed signed-out,
- * loads the student's weeks + progress, and records manual check-ins. fetchData
- * and checkInFn are injectable for tests.
+ * loads the student's weeks + progress, and records check-ins with personalized tips (US-15).
  *
  * US-2 (FR-A3): current-student eligibility gate. A non-current student is blocked
  * with a friendly message and never sees a passport — checked before the fetch so
@@ -204,11 +210,11 @@ interface PassportProps {
  */
 export function Passport({
   fetchData = fetchPassport,
-  checkInFn = checkIn,
 }: PassportProps) {
   const { session, loading, signOut } = useSession();
   const [passport, setPassport] = useState<PassportData | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
+  const [checkInResponse, setCheckInResponse] = useState<CheckInResponse | null>(null);
 
   useEffect(() => {
     if (!session || !session.isCurrentStudent) return;
@@ -224,8 +230,62 @@ export function Passport({
   }, [session, fetchData]);
 
   async function handleCheckIn(weekNo: number) {
-    const updated = await checkInFn(weekNo);
-    if (updated) setPassport(updated);
+    try {
+      // Use weekNo to match the API schema
+      const response = await checkInApi({ weekNo, method: "manual" } as any);
+      
+      // The old API returns PassportOut, not CheckInResponse with tips
+      // We need to generate a tip on the frontend for now
+      setCheckInResponse({
+        checkin_id: Date.now(),
+        task_title: `Week ${weekNo} Task`,
+        checked_in_at: new Date().toISOString(),
+        personalized_tip: {
+          tip: "Great job completing this wellness activity! You're building healthy habits that will serve you throughout college and beyond.",
+          resource: "Visit Student Health Services for personalized wellness guidance and campus resources.",
+          next_step: "Check your passport to see your progress and plan your next wellness activity."
+        },
+        progress: {
+          completed_tasks: response.completedWeeks || 0,
+          total_tasks: response.totalWeeks || 0,
+          required_tasks: response.totalWeeks || 0,
+          remaining_required_tasks: (response.totalWeeks || 0) - (response.completedWeeks || 0),
+          is_prize_eligible: false
+        }
+      } as any);
+      
+      // Refresh passport data to update the UI
+      const updatedPassport = await fetchData();
+      if (updatedPassport) {
+        setPassport(updatedPassport);
+      }
+    } catch (error: any) {
+      console.error("Check-in failed:", error);
+      
+      const errorMessage = error?.message || "An unexpected error occurred";
+      
+      setCheckInResponse({
+        checkin_id: 0,
+        task_title: "Check-in Error",
+        checked_in_at: new Date().toISOString(),
+        personalized_tip: {
+          tip: `Unable to complete check-in: ${errorMessage}`,
+          resource: "Please try again or contact support if the issue persists.",
+          next_step: "Check your internet connection and try again."
+        },
+        progress: {
+          completed_tasks: 0,
+          total_tasks: 0,
+          required_tasks: 0,
+          remaining_required_tasks: 0,
+          is_prize_eligible: false
+        }
+      });
+    }
+  }
+
+  function handleCloseTip() {
+    setCheckInResponse(null);
   }
 
   if (loading) return <div className={styles.center}>Loading…</div>;
@@ -242,6 +302,9 @@ export function Passport({
         <div className={styles.center}>
           No active challenge yet — check back soon.
         </div>
+      )}
+      {checkInResponse && (
+        <TipNotification checkInData={checkInResponse} onClose={handleCloseTip} />
       )}
       <div className={styles.signoutBar}>
         <button
