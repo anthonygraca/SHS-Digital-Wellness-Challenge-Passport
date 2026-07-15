@@ -304,15 +304,58 @@ infer. The card says so in words, because "0" beside "Guide chat sessions" reads
 when the truth is that nobody can.
 
 **The reports gained a challenge selector (US-23).** Only US-23's Gherkin says "both can be viewed per
-challenge", but `challenge_id` is an optional query param on *all four* routes under `/api/reports`
-(participation, attendance, engagement, and the prize CSV), and one control on the dashboard drives
-them. The resolver is shared for the same reason it always was — two cards on one dashboard must never
+challenge", but `challenge_id` is an optional query param on *every* route under `/api/reports`
+(participation, attendance, engagement, the outcomes aggregate US-24 later added, and the prize CSV),
+and one control on the dashboard drives them. The resolver is shared for the same reason it always was — two cards on one dashboard must never
 disagree about which challenge they describe — and the export follows it because a drawing run against
 the wrong semester has real prizes attached. Omitting the param keeps the old behaviour exactly (the
 campus's active challenge), and an explicit id is held to the same published-only rule: the parameter
 selects, it does not unlock a draft. A cross-campus id is a 404, not a 403, so a report cannot be used
 to probe which ids exist elsewhere. Side effect worth having: a past semester is reportable at all,
 which it was not before.
+
+**As built (US-24 / FR-F4).** No schema at all: `learning_outcome_report` in
+`services/reports.py` is a query over the `AssessmentItem` / `AssessmentResponse` the US-18 block above
+already describes, and US-24 added no column, no table and no write path. That is the point — `score`
+is a `Float` and `scored_by` is `NOT NULL` today precisely because this report was foreseen, so the
+story is the read side of decisions already argued. Four things are not readable off the schema:
+
+**The bucket vocabulary is open, and that breaks the pattern the other reports share.**
+`AttendanceReportOut` and `EngagementReportOut` reuse a `Literal` from the write path and seed their
+buckets from a module-level `*_ORDER` tuple, which buys two things at once: a fourth capture method
+cannot be added without this report failing to validate, and the bucket order is fixed. Neither is
+available here. `outcome_tag` is admin-authored free text on `AssessmentItem` (US-12), so there is no
+constant to seed from and nothing to check against — `OutcomeScoreOut.outcome_tag` is a plain `str` and
+there is no `OUTCOME_ORDER`. The order comes from the query instead (`ORDER BY outcome_tag`), and it is
+alphabetical rather than ranked by score because rows must hold still: ranking would move a row every
+time its mean crossed a rounding boundary, reshuffling a card under an admin who just hit Refresh.
+
+**The query is driven from the items and outer-joins the responses, which is the same guarantee the
+`*_ORDER` tuples give, obtained differently.** A tag whose items nobody has answered must still appear
+(`response_count: 0`, `mean_score: null`) — "nobody has answered anything tagged sleep-hygiene" is a
+finding, and an inner join would make it indistinguishable from a tag that does not exist. The tag set
+is still knowable without a constant, because the challenge's own items enumerate it. This is
+`participation_report`'s LEFT OUTER JOIN argument — a week nobody finished is still a rung — in another
+vocabulary. Scope comes from the join through `Task` to `challenge_id`, as the two reports above, just
+one hop longer: `AssessmentResponse → AssessmentItem → Task`.
+
+**`mean_score` is `None`, never `0.0`, when nothing has been answered, and the total mean is weighted
+by response.** The two are the same instinct: report the number that is true rather than the one that
+is convenient. `0.0` for "not asked yet" would paint a 0% bar an admin reads as a catastrophe, so the
+card names those tags in prose instead of drawing them a row — a 0% bar and a no-data bar look
+identical, and an outcome the cohort genuinely bombed is the one finding here worth acting on. The
+total mean is `avg()` over every row, not the average of the per-tag means, which would let a tag with
+three responses outvote one with three hundred. Both totals are counted across every response rather
+than folded up from the buckets, exactly as `total_checkins` is.
+
+**`human_scored_count` is a structural 0 until US-19** — the same shape as `guide_sessions` above, and
+for the same reason. Nothing writes `scored_by="human"`; the reflection override is US-19 / FR-E5.
+`scored_by` is counted but never filtered, which is the whole of US-24's second Gherkin scenario, and
+the count exists so that "overridden scores are included in the totals" is readable off the report
+rather than taken on faith. The scenario is exercised by direct-inserted rows, as US-23's guide
+sessions are, so US-19 only has to write one. The card stays silent while the count is 0 rather than
+drawing a permanently-empty provenance badge: unlike the guide's zero, there is nothing an admin could
+do about this one, and it is a fact about the API rather than about the cohort.
 
 **Theme is data, not code (R6 / NFR-6).** `Theme.id` is a slug that doubles as the SPA's
 `data-theme` value, so a theme's static token block still skins the app if its row is missing.
