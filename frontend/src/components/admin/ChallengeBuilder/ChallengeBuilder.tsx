@@ -47,6 +47,7 @@ function ChallengeList({
   const [challenges, setChallenges] = useState<ChallengeSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [duplicating, setDuplicating] = useState<ChallengeSummary | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -78,23 +79,35 @@ function ChallengeList({
         <p className={styles.empty}>No challenges yet — create the first one.</p>
       )}
 
+      {/* The open affordance and the actions are siblings, not nested: a button
+          inside a role="button" is invalid, and its clicks would bubble to onOpen. */}
       {challenges.map((c) => (
-        <div
-          key={c.id}
-          role="button"
-          tabIndex={0}
-          className={styles.challengeCard}
-          onClick={() => onOpen(c.id)}
-          onKeyDown={(e) => e.key === "Enter" && onOpen(c.id)}
-          aria-label={`Open ${c.name}`}
-        >
-          <div className={styles.challengeCardInfo}>
-            <h3>{c.name}</h3>
-            <p>
-              {c.semester} · {fmtDate(c.start_date)} – {fmtDate(c.end_date)}
-            </p>
+        <div key={c.id} className={styles.challengeCardWrap}>
+          <div
+            role="button"
+            tabIndex={0}
+            className={styles.challengeCard}
+            onClick={() => onOpen(c.id)}
+            onKeyDown={(e) => e.key === "Enter" && onOpen(c.id)}
+            aria-label={`Open ${c.name}`}
+          >
+            <div className={styles.challengeCardInfo}>
+              <h3>{c.name}</h3>
+              <p>
+                {c.semester} · {fmtDate(c.start_date)} – {fmtDate(c.end_date)}
+              </p>
+            </div>
+            <StatusBadge status={c.status} />
           </div>
-          <StatusBadge status={c.status} />
+          <div className={styles.challengeCardActions}>
+            <button
+              type="button"
+              className={`${styles.btnSecondary} ${styles.cardAction}`}
+              onClick={() => setDuplicating(c)}
+            >
+              Duplicate
+            </button>
+          </div>
         </div>
       ))}
 
@@ -102,6 +115,14 @@ function ChallengeList({
         <ChallengeFormModal
           onClose={() => setShowForm(false)}
           onSaved={(c) => { setShowForm(false); onCreated(c.id); }}
+        />
+      )}
+
+      {duplicating && (
+        <DuplicateChallengeModal
+          challenge={duplicating}
+          onClose={() => setDuplicating(null)}
+          onDuplicated={(c) => { setDuplicating(null); onCreated(c.id); }}
         />
       )}
     </>
@@ -115,13 +136,16 @@ function ChallengeList({
 function ChallengeDetail({
   id,
   onBack,
+  onDuplicated,
 }: {
   id: number;
   onBack: () => void;
+  onDuplicated: (id: number) => void;
 }) {
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [loading, setLoading] = useState(true);
   const [editChallenge, setEditChallenge] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [itemsTask, setItemsTask] = useState<Task | null>(null);
@@ -215,6 +239,13 @@ function ChallengeDetail({
                 Edit theme
               </button>
             )}
+            <button
+              type="button"
+              className={styles.btnSecondary}
+              onClick={() => setDuplicating(true)}
+            >
+              Duplicate
+            </button>
             {challenge.status === "draft" && (
               <button
                 type="button"
@@ -288,6 +319,14 @@ function ChallengeDetail({
           themeId={challenge.theme_id}
           onClose={() => setEditingTheme(false)}
           onSaved={() => { setEditingTheme(false); void refreshThemes(); }}
+        />
+      )}
+
+      {duplicating && (
+        <DuplicateChallengeModal
+          challenge={challenge}
+          onClose={() => setDuplicating(false)}
+          onDuplicated={(c) => { setDuplicating(false); onDuplicated(c.id); }}
         />
       )}
     </>
@@ -732,6 +771,89 @@ function ChallengeFormModal({
             </button>
             <button type="submit" className={styles.btnPrimary} disabled={saving}>
               {saving ? "Saving…" : existing ? "Save changes" : "Create challenge"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Duplicate challenge modal (US-14)
+// ---------------------------------------------------------------------------
+
+function DuplicateChallengeModal({
+  challenge,
+  onClose,
+  onDuplicated,
+}: {
+  challenge: ChallengeSummary | Challenge;
+  onClose: () => void;
+  onDuplicated: (c: Challenge) => void;
+}) {
+  // Prefilled rather than one-tap: the server would derive this same name, but
+  // the semester is the field an admin actually came here to change.
+  const [name, setName] = useState(`${challenge.name} (Copy)`);
+  const [semester, setSemester] = useState(challenge.semester);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSaving(true);
+    try {
+      onDuplicated(await api.duplicateChallenge(challenge.id, { name, semester }));
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Duplicate failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className={styles.overlay}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Duplicate challenge"
+    >
+      <div className={styles.modal}>
+        <h2>Duplicate challenge</h2>
+        {error && <p className={styles.error}>{error}</p>}
+        <form onSubmit={(e) => void handleSubmit(e)}>
+          <div className={styles.fieldGroup}>
+            <label htmlFor="dup-name">New challenge name</label>
+            <input
+              id="dup-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </div>
+          <div className={styles.fieldGroup}>
+            <label htmlFor="dup-semester">Semester</label>
+            <input
+              id="dup-semester"
+              type="text"
+              value={semester}
+              onChange={(e) => setSemester(e.target.value)}
+              required
+              placeholder="e.g. Spring 2026"
+            />
+            <p className={styles.fieldHint}>
+              Tasks, quiz items, and theme are copied, dates included. The copy
+              starts as a draft — retime it before publishing.
+            </p>
+          </div>
+          <div className={styles.formActions}>
+            <button type="button" className={styles.btnSecondary} onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className={styles.btnPrimary} disabled={saving}>
+              {saving ? "Duplicating…" : "Duplicate"}
             </button>
           </div>
         </form>
@@ -1268,6 +1390,7 @@ export function ChallengeBuilder() {
           <ChallengeDetail
             id={view.id}
             onBack={() => setView({ kind: "list" })}
+            onDuplicated={(id) => setView({ kind: "detail", id })}
           />
         )}
       </main>

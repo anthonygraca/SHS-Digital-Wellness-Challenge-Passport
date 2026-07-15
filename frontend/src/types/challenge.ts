@@ -63,6 +63,12 @@ export interface ChallengeUpdate {
   theme_id?: string;
 }
 
+/** Overrides for a duplicate (US-14); omitted fields are derived server-side. */
+export interface ChallengeDuplicate {
+  name?: string;
+  semester?: string;
+}
+
 export interface TaskCreate {
   title: string;
   caption?: string;
