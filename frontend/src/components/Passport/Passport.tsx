@@ -149,6 +149,8 @@ export function PassportView({
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanResult, setScanResult] = useState<CheckInResult | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
+  // Why an action was refused offline (US-6 / FR-C4), null when nothing was refused.
+  const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
 
   // Escape closes the detail sheet.
   useEffect(() => {
@@ -162,6 +164,15 @@ export function PassportView({
 
   async function handleCheckIn() {
     if (!onCheckIn || selectedWeek == null) return;
+    if (!online) {
+      // Returns before setSubmitting and before awaiting onCheckIn, so there is no
+      // request, no optimistic state, and nothing queued to replay — the week keeps
+      // the status the server last gave it.
+      setOfflineNotice(
+        "Checking in needs a connection. Nothing was recorded — reconnect and try again.",
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       await onCheckIn(selectedWeek.weekNo);
@@ -171,6 +182,16 @@ export function PassportView({
   }
 
   function openScanner() {
+    if (!online) {
+      // The scanner never mounts, so the camera never starts and onScan is
+      // unreachable. Nothing to queue: the server checks each token's freshness, so
+      // a scan replayed later would be rejected anyway — after we had already told
+      // the student they were checked in. Refusing now is the only honest answer.
+      setOfflineNotice(
+        "Scanning a QR code needs a connection. Nothing was recorded — reconnect and try again.",
+      );
+      return;
+    }
     setScanResult(null);
     setScanError(null);
     setScannerOpen(true);
@@ -323,6 +344,33 @@ export function PassportView({
           onDecode={(token) => void handleDecode(token)}
           onClose={() => setScannerOpen(false)}
         />
+      )}
+
+      {offlineNotice && (
+        <div className={styles.backdrop} onClick={() => setOfflineNotice(null)}>
+          <div
+            className={styles.sheet}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Connection required"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.sheetHandle} aria-hidden="true" />
+            <button
+              type="button"
+              className={styles.close}
+              onClick={() => setOfflineNotice(null)}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+
+            <h2 className={styles.sheetTitle}>You're offline</h2>
+            <p className={styles.sheetCaption} role="alert">
+              {offlineNotice}
+            </p>
+          </div>
+        </div>
       )}
 
       {(scanResult || scanError) && (
