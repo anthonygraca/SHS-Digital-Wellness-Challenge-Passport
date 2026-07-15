@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useSession } from "../../auth/SessionProvider";
+import { isAdminSession } from "../../auth/roles";
 import { ApiError } from "../../api/challenges";
 import { EligibilityBlocked } from "../EligibilityBlocked/EligibilityBlocked";
+import { OfflineBanner } from "../OfflineBanner/OfflineBanner";
+import { readPassportSnapshot, writePassportSnapshot } from "../../offline/snapshot";
+import { useOnlineStatus } from "../../offline/useOnlineStatus";
 import { checkIn, fetchPassport, scanCheckIn } from "../../passport/passport";
 import type {
   CheckInResult,
@@ -92,10 +96,16 @@ export function PassportView({
   passport,
   onCheckIn,
   onScan,
+  online = true,
+  stale = false,
 }: {
   passport: PassportData;
   onCheckIn?: OnCheckIn;
   onScan?: OnScan;
+  /** Drives the offline banner and the refusal to start a network action (US-6). */
+  online?: boolean;
+  /** Whether `passport` came from the offline cache rather than a live fetch. */
+  stale?: boolean;
 }) {
   const {
     challengeName,
@@ -139,6 +149,8 @@ export function PassportView({
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanResult, setScanResult] = useState<CheckInResult | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
+  // Why an action was refused offline (US-6 / FR-C4), null when nothing was refused.
+  const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
 
   // Escape closes the detail sheet.
   useEffect(() => {
@@ -152,6 +164,15 @@ export function PassportView({
 
   async function handleCheckIn() {
     if (!onCheckIn || selectedWeek == null) return;
+    if (!online) {
+      // Returns before setSubmitting and before awaiting onCheckIn, so there is no
+      // request, no optimistic state, and nothing queued to replay — the week keeps
+      // the status the server last gave it.
+      setOfflineNotice(
+        "Checking in needs a connection. Nothing was recorded — reconnect and try again.",
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       await onCheckIn(selectedWeek.weekNo);
@@ -161,6 +182,16 @@ export function PassportView({
   }
 
   function openScanner() {
+    if (!online) {
+      // The scanner never mounts, so the camera never starts and onScan is
+      // unreachable. Nothing to queue: the server checks each token's freshness, so
+      // a scan replayed later would be rejected anyway — after we had already told
+      // the student they were checked in. Refusing now is the only honest answer.
+      setOfflineNotice(
+        "Scanning a QR code needs a connection. Nothing was recorded — reconnect and try again.",
+      );
+      return;
+    }
     setScanResult(null);
     setScanError(null);
     setScannerOpen(true);
@@ -183,6 +214,7 @@ export function PassportView({
 
   return (
     <main className={styles.screen}>
+      <OfflineBanner online={online} stale={stale} />
       <header className={styles.header} style={heroStyle}>
         <div className={styles.brand}>
           {theme?.logoUrl && (
@@ -314,6 +346,33 @@ export function PassportView({
         />
       )}
 
+      {offlineNotice && (
+        <div className={styles.backdrop} onClick={() => setOfflineNotice(null)}>
+          <div
+            className={styles.sheet}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Connection required"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.sheetHandle} aria-hidden="true" />
+            <button
+              type="button"
+              className={styles.close}
+              onClick={() => setOfflineNotice(null)}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+
+            <h2 className={styles.sheetTitle}>You're offline</h2>
+            <p className={styles.sheetCaption} role="alert">
+              {offlineNotice}
+            </p>
+          </div>
+        </div>
+      )}
+
       {(scanResult || scanError) && (
         <div className={styles.backdrop} onClick={() => { setScanResult(null); setScanError(null); }}>
           <div
@@ -381,16 +440,40 @@ export function Passport({
   const { session, loading, signOut } = useSession();
   const [passport, setPassport] = useState<PassportData | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
+  // Whether what we are showing came from the cache rather than this load's fetch.
+  const [stale, setStale] = useState(false);
+  const online = useOnlineStatus();
   const { applyTheme } = useTheme();
 
   useEffect(() => {
     if (!session || !session.isCurrentStudent) return;
     let active = true;
-    void fetchData().then((data) => {
-      if (!active) return;
-      setPassport(data);
-      setDataLoading(false);
-    });
+    void (async () => {
+      try {
+        const data = await fetchData();
+        if (!active) return;
+        // Only a successful fetch writes, and nothing here ever clears: a null is
+        // any !res.ok, including a transient 500, and throwing away a good snapshot
+        // over a blip would cost the student their offline passport. The signed-out
+        // case is already handled where it belongs, in SessionProvider.
+        if (data) writePassportSnapshot(data);
+        setPassport(data);
+        setStale(false);
+      } catch {
+        // Offline: fetch rejects instead of resolving !res.ok, so fetchPassport's
+        // null-on-failure guard never runs. Left uncaught this strands the screen
+        // on "Loading your passport…" permanently. A rejected fetch — not
+        // navigator.onLine — is what proves the data on screen is not live.
+        if (!active) return;
+        const cached = readPassportSnapshot();
+        setPassport(cached);
+        setStale(cached != null);
+      } finally {
+        // active-guarded: finally still runs when the effect was torn down
+        // mid-flight, and setting state after unmount is a no-op worth avoiding.
+        if (active) setDataLoading(false);
+      }
+    })();
     return () => {
       active = false;
     };
@@ -418,6 +501,11 @@ export function Passport({
 
   if (loading) return <div className={styles.center}>Loading…</div>;
   if (!session) return <Navigate to="/" replace />;
+  // The manifest's start_url is /passport, so this is where an installed app opens —
+  // including for staff. Without this they would land on "not eligible to join",
+  // which roles.ts already calls the wrong answer for an admin. Only admins leave,
+  // so this cannot bounce against the landing's mirror-image redirect.
+  if (isAdminSession(session)) return <Navigate to="/admin" replace />;
   if (!session.isCurrentStudent) return <EligibilityBlocked />;
 
   return (
@@ -429,7 +517,17 @@ export function Passport({
           passport={passport}
           onCheckIn={handleCheckIn}
           onScan={handleScan}
+          online={online}
+          stale={stale}
         />
+      ) : !online ? (
+        // Offline with nothing cached. The branch below would say "no active
+        // challenge yet", which we have no way of knowing and is probably false —
+        // we never reached the server to ask.
+        <div className={styles.center} role="status">
+          You're offline and haven't synced your passport yet. Reconnect to load
+          your progress.
+        </div>
       ) : (
         <div className={styles.center}>
           No active challenge yet — check back soon.

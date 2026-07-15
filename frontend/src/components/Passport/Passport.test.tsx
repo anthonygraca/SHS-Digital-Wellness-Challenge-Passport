@@ -39,6 +39,29 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/**
+ * jsdom reports navigator.onLine === true and offers no way to set it, so tests
+ * redefine the property. It is global mutable state — the US-6 blocks below restore
+ * it in their own afterEach so it cannot leak into the rest of the suite.
+ *
+ * Sets the property only, deliberately: useOnlineStatus reads it when it mounts, and
+ * every test here sets the connection before rendering. Dispatching the online /
+ * offline event too would push a state update into whatever is still mounted — and
+ * a describe-level afterEach runs before Testing Library's cleanup, so the restore
+ * would land on a live component outside act(). The event path is covered where it
+ * belongs, in useOnlineStatus.test.tsx.
+ */
+function setOnline(value: boolean) {
+  Object.defineProperty(navigator, "onLine", { value, configurable: true });
+}
+
+/**
+ * How a fetch fails with no connection: it REJECTS. It does not resolve with a
+ * !res.ok response, which is why fetchPassport's null-on-failure guard is no help
+ * offline and the caller has to catch.
+ */
+const offline = () => new TypeError("Failed to fetch");
+
 const asSession = (over: Partial<Session>): Session => ({
   subject: "abc@csub.edu",
   affiliation: "student",
@@ -407,6 +430,156 @@ describe("PassportView QR scan check-in (US-8)", () => {
     expect(within(sheet).getByRole("alert")).toHaveTextContent(
       /this code is no longer valid, ask the attendant/i,
     );
+  });
+});
+
+/**
+ * Binds Scenarios 2 and 3 of docs/features.md § US-6 (FR-C4).
+ *
+ * Scenario 1 (installability) has no DOM to assert — its manifest preconditions are
+ * pinned in src/pwa/manifest.test.ts, and the install itself is checked by hand
+ * against a preview build, since jsdom runs no service worker.
+ *
+ * "I see my last-synced weeks and progress from cache" is bound as: a load whose
+ * fetch rejects still renders the countdown and tiles from the previous load. The
+ * rejection — not navigator.onLine — is what stands in for "no network connection",
+ * because that is precisely what the browser does offline: fetch throws rather than
+ * returning a failed response.
+ */
+describe("Passport offline viewing (US-6 / FR-C4)", () => {
+  afterEach(() => {
+    localStorage.clear();
+    setOnline(true);
+  });
+
+  /** Seeds the snapshot the way the app does: one successful online load. */
+  async function loadOnceOnline() {
+    const { unmount } = render(
+      <Passport fetchData={vi.fn().mockResolvedValue(passportWith(3))} checkInFn={vi.fn()} />,
+    );
+    await screen.findByText(/3 of 7 complete, 4 remaining/i);
+    unmount();
+  }
+
+  it("Scenario: Offline shows last-synced progress — weeks and progress come from cache", async () => {
+    sessionState.session = asSession({ isCurrentStudent: true });
+    await loadOnceOnline();
+
+    setOnline(false);
+    render(<Passport fetchData={vi.fn().mockRejectedValue(offline())} checkInFn={vi.fn()} />);
+
+    expect(
+      await screen.findByText(/3 of 7 complete, 4 remaining/i),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(7);
+    expect(screen.getAllByText("Complete")).toHaveLength(3);
+  });
+
+  it("Scenario: Offline shows last-synced progress — and an offline indicator", async () => {
+    sessionState.session = asSession({ isCurrentStudent: true });
+    await loadOnceOnline();
+
+    setOnline(false);
+    render(<Passport fetchData={vi.fn().mockRejectedValue(offline())} checkInFn={vi.fn()} />);
+
+    await screen.findByText(/3 of 7 complete, 4 remaining/i);
+    expect(screen.getByRole("status", { name: /offline/i })).toBeInTheDocument();
+  });
+
+  it("shows no indicator when the passport loaded live", async () => {
+    sessionState.session = asSession({ isCurrentStudent: true });
+    render(
+      <Passport fetchData={vi.fn().mockResolvedValue(passportWith(3))} checkInFn={vi.fn()} />,
+    );
+
+    await screen.findByText(/3 of 7 complete, 4 remaining/i);
+    expect(screen.queryByRole("status", { name: /offline/i })).toBeNull();
+  });
+
+  it("says we're offline, not that there's no challenge, when nothing was ever synced", async () => {
+    // The pre-existing empty state claims the student has no active challenge. With
+    // no connection we never reached the server to ask, so that would be a guess —
+    // and for anyone opening the installed app on a bad signal, a wrong one.
+    sessionState.session = asSession({ isCurrentStudent: true });
+    setOnline(false);
+
+    render(<Passport fetchData={vi.fn().mockRejectedValue(offline())} checkInFn={vi.fn()} />);
+
+    expect(await screen.findByText(/you're offline and haven't synced/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no active challenge yet/i)).toBeNull();
+  });
+
+  it("does not hang on the spinner when offline with nothing cached", async () => {
+    sessionState.session = asSession({ isCurrentStudent: true });
+    setOnline(false);
+
+    render(<Passport fetchData={vi.fn().mockRejectedValue(offline())} checkInFn={vi.fn()} />);
+
+    await waitFor(() =>
+      expect(screen.queryByText(/loading your passport/i)).toBeNull(),
+    );
+  });
+});
+
+describe("PassportView offline action gating (US-6 / FR-C4)", () => {
+  it("Scenario: scanning offline — I am told the action requires a connection", async () => {
+    const onScan = vi.fn();
+    render(<PassportView passport={passportWith(3)} onScan={onScan} online={false} />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /scan qr to check in/i }),
+    );
+
+    const sheet = await screen.findByRole("dialog", { name: /connection required/i });
+    expect(within(sheet).getByRole("alert")).toHaveTextContent(
+      /scanning a qr code needs a connection/i,
+    );
+  });
+
+  it("Scenario: scanning offline — no invalid check-in is queued as complete", async () => {
+    const onScan = vi.fn();
+    render(<PassportView passport={passportWith(3)} onScan={onScan} online={false} />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /scan qr to check in/i }),
+    );
+
+    // The scanner never mounts, so its stub's simulate-scan button is absent — the
+    // camera never starts and the token never reaches a handler. Nothing is queued.
+    expect(screen.queryByRole("button", { name: /simulate-scan/i })).toBeNull();
+    expect(onScan).not.toHaveBeenCalled();
+  });
+
+  it("refuses a manual check-in offline, and records nothing", async () => {
+    const onCheckIn = vi.fn();
+    render(<PassportView passport={passportWith(3)} onCheckIn={onCheckIn} online={false} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
+    await userEvent.click(
+      within(screen.getByRole("dialog", { name: /week 4/i })).getByRole("button", {
+        name: /^check in$/i,
+      }),
+    );
+
+    const notice = await screen.findByRole("dialog", { name: /connection required/i });
+    expect(within(notice).getByRole("alert")).toHaveTextContent(
+      /checking in needs a connection/i,
+    );
+    expect(onCheckIn).not.toHaveBeenCalled();
+    // The week keeps the status the server last gave it — nothing optimistic.
+    expect(screen.getAllByText("Complete")).toHaveLength(3);
+  });
+
+  it("leaves both actions working when online", async () => {
+    const onScan = vi.fn();
+    render(<PassportView passport={passportWith(3)} onScan={onScan} />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /scan qr to check in/i }),
+    );
+
+    expect(screen.getByRole("button", { name: /simulate-scan/i })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /connection required/i })).toBeNull();
   });
 });
 
