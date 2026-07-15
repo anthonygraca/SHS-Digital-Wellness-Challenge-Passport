@@ -10,6 +10,7 @@ from app.routers import (
     auth,
     challenges,
     enrollment,
+    guide,
     passport,
     reports,
     themes,
@@ -30,6 +31,7 @@ app.include_router(passport.router)
 app.include_router(assessments.router)
 app.include_router(reports.router)
 app.include_router(themes.router)
+app.include_router(guide.router)
 
 
 @app.get("/healthz")

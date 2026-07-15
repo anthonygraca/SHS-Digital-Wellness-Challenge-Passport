@@ -474,6 +474,12 @@
 
 /* --- Sign out --- */
 
+/*
+ * Carries the crisis affordance as well as sign-out (FR-E3). It is the only chrome that
+ * survives every state of this route, which is what a safety affordance needs to be in.
+ * Wraps rather than shrinks: two buttons at 48px min-height do not fit side by side on a
+ * 320px viewport without dropping below the 44px touch floor.
+ */
 .signoutBar {
   position: fixed;
   bottom: 0;
@@ -481,7 +487,9 @@
   right: 0;
   z-index: 10;
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  gap: 10px;
   padding: 12px;
   background: color-mix(in srgb, var(--wp-surface) 88%, transparent);
   backdrop-filter: blur(6px);
