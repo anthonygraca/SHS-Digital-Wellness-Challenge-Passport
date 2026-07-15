@@ -38,8 +38,10 @@ vi.mock("../../../api/themes", () => ({
 
 // ChallengeDetail calls useNavigate (Live buttons, US-28); these tests render
 // the builder without a Router, so stub it like the other component tests do.
+// One hoisted fn rather than a fresh one per call, so navigation is assertable.
+const navigate = vi.hoisted(() => vi.fn());
 vi.mock("react-router-dom", () => ({
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigate,
   Navigate: ({ to }: { to: string }) => <div>redirect:{to}</div>,
 }));
 
@@ -173,5 +175,23 @@ describe("ChallengeBuilder — duplicate (US-14 / FR-B6)", () => {
       screen.getByRole("dialog", { name: /duplicate challenge/i }),
     ).toBeInTheDocument();
     expect(mocks.getChallenge).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChallengeBuilder — reports entry point (US-21 / FR-F1)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.listChallenges.mockResolvedValue([PRIOR]);
+  });
+
+  it("opens the reporting dashboard from the topbar", async () => {
+    render(<ChallengeBuilder />);
+    await screen.findByText(PRIOR.name);
+
+    await userEvent.click(screen.getByRole("button", { name: /^reports$/i }));
+
+    // No challenge id: the report always covers the active challenge, which the
+    // server resolves from the admin's campus.
+    expect(navigate).toHaveBeenCalledWith("/admin/reports");
   });
 });
