@@ -36,6 +36,13 @@ vi.mock("../../../api/themes", () => ({
   listThemes: () => Promise.resolve([]),
 }));
 
+// ChallengeDetail calls useNavigate (Live buttons, US-28); these tests render
+// the builder without a Router, so stub it like the other component tests do.
+vi.mock("react-router-dom", () => ({
+  useNavigate: () => vi.fn(),
+  Navigate: ({ to }: { to: string }) => <div>redirect:{to}</div>,
+}));
+
 vi.mock("../../../auth/SessionProvider", () => ({
   useSession: () => ({
     session: { affiliation: "staff" },
