@@ -17,6 +17,7 @@ const navigate = vi.fn();
 const api = vi.hoisted(() => ({
   getParticipationReport: vi.fn(),
   getAttendanceReport: vi.fn(),
+  exportPrizeCsv: vi.fn(),
 }));
 
 vi.mock("react-router-dom", () => ({
@@ -28,16 +29,43 @@ vi.mock("../../../api/reports", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../api/reports")>()),
   getParticipationReport: api.getParticipationReport,
   getAttendanceReport: api.getAttendanceReport,
+  exportPrizeCsv: api.exportPrizeCsv,
 }));
+
+// jsdom implements neither, and the export hands its blob to the browser through
+// both. Stubbed rather than faked: what matters is the anchor they feed.
+const objectUrl = "blob:prize-list";
+const createObjectURL = vi.fn();
+const revokeObjectURL = vi.fn();
+URL.createObjectURL = createObjectURL;
+URL.revokeObjectURL = revokeObjectURL;
+
+/** The synthetic anchor the component clicks, captured at click time. */
+function captureDownload() {
+  const clicked: { href: string; download: string }[] = [];
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: HTMLAnchorElement,
+  ) {
+    clicked.push({ href: this.href, download: this.download });
+  });
+  return clicked;
+}
 
 // resetAllMocks, not clearAllMocks: clearAllMocks leaves mockResolvedValueOnce
 // queues in place, which the beforeEach defaults below would sit behind. The
 // vi.mock factory closes over these same fn objects, so the wiring survives.
+// restoreAllMocks first, to lift the anchor-click spy captureDownload installs —
+// reset alone would leave it stubbed for every later test.
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.resetAllMocks();
 });
 
 beforeEach(() => {
+  // Re-armed here rather than at vi.fn(): resetAllMocks above wipes every mock's
+  // implementation, this one included, and a createObjectURL returning undefined
+  // fails as a wrong href rather than as a missing stub.
+  createObjectURL.mockReturnValue(objectUrl);
   // The two cards load together under one Promise.all, so a test about the
   // funnel still needs attendance to resolve. Individual tests override.
   api.getParticipationReport.mockResolvedValue(asReport());
@@ -377,5 +405,98 @@ describe("Auto-vs-manual attendance report (US-22 / FR-F2)", () => {
 
     expect(await screen.findByText(/no published challenge yet/i)).toBeInTheDocument();
     expect(screen.queryByText(/attendance capture/i)).toBeNull();
+  });
+});
+
+describe("Prize-eligible CSV export (US-26 / FR-F5)", () => {
+  const asCsv = (filename = "prize-eligible-Fall-2026-1.csv") => ({
+    blob: new Blob(["student_id,sso_subject\n"], { type: "text/csv" }),
+    filename,
+  });
+
+  const exportButton = () =>
+    screen.getByRole("button", { name: /export prize list \(csv\)/i });
+
+  it("downloads the prize list under the name the server gave it", async () => {
+    api.exportPrizeCsv.mockResolvedValue(asCsv());
+    const clicked = captureDownload();
+
+    render(<Reports />);
+    await userEvent.click(await screen.findByRole("button", { name: /export prize/i }));
+
+    // The filename is the server's, not rebuilt here: two admins exporting the
+    // same challenge should end up with the same file on disk.
+    expect(clicked).toEqual([
+      { href: objectUrl, download: "prize-eligible-Fall-2026-1.csv" },
+    ]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("releases the object URL once the download is handed over", async () => {
+    api.exportPrizeCsv.mockResolvedValue(asCsv());
+    captureDownload();
+
+    render(<Reports />);
+    await userEvent.click(await screen.findByRole("button", { name: /export prize/i }));
+
+    // Un-revoked object URLs pin their blob in memory for the life of the tab,
+    // and an admin can export repeatedly while running a drawing.
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith(objectUrl);
+  });
+
+  it("never renders the exported rows on the dashboard", async () => {
+    api.exportPrizeCsv.mockResolvedValue(asCsv());
+    captureDownload();
+
+    render(<Reports />);
+    await userEvent.click(await screen.findByRole("button", { name: /export prize/i }));
+
+    // The file is per-student; the screen stays aggregate (FR-F6). The CSV goes
+    // to the downloads folder and nowhere else.
+    expect(screen.queryByText(/sso_subject/i)).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("40");
+  });
+
+  it("says so when the export fails", async () => {
+    api.exportPrizeCsv.mockRejectedValue(new ApiError(500, "Server exploded"));
+    const clicked = captureDownload();
+
+    render(<Reports />);
+    await userEvent.click(await screen.findByRole("button", { name: /export prize/i }));
+
+    // Unlike a failed refresh, a failed export has no stale copy to fall back on
+    // — silence would look like a download that simply never arrived.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Server exploded");
+    expect(clicked).toEqual([]);
+  });
+
+  it("re-enables the button after a failed export so it can be retried", async () => {
+    api.exportPrizeCsv
+      .mockRejectedValueOnce(new ApiError(500, "Server exploded"))
+      .mockResolvedValue(asCsv());
+    const clicked = captureDownload();
+
+    render(<Reports />);
+    await userEvent.click(await screen.findByRole("button", { name: /export prize/i }));
+    await screen.findByRole("alert");
+
+    expect(exportButton()).toBeEnabled();
+    await userEvent.click(exportButton());
+
+    expect(clicked).toHaveLength(1);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("offers no export when the campus has nothing published", async () => {
+    api.getParticipationReport.mockRejectedValue(
+      new ApiError(404, "There's no active challenge for your campus right now."),
+    );
+
+    render(<Reports />);
+    await screen.findByText(/no published challenge yet/i);
+
+    // No challenge means no drawing — a button here could only 404.
+    expect(screen.queryByRole("button", { name: /export prize/i })).toBeNull();
   });
 });
