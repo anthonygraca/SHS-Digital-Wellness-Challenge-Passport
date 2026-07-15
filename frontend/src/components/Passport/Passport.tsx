@@ -7,7 +7,12 @@ import { EligibilityBlocked } from "../EligibilityBlocked/EligibilityBlocked";
 import { OfflineBanner } from "../OfflineBanner/OfflineBanner";
 import { readPassportSnapshot, writePassportSnapshot } from "../../offline/snapshot";
 import { useOnlineStatus } from "../../offline/useOnlineStatus";
-import { checkIn, fetchPassport, scanCheckIn } from "../../passport/passport";
+import {
+  checkIn,
+  fetchPassport,
+  recordContentView,
+  scanCheckIn,
+} from "../../passport/passport";
 import type {
   CheckInResult,
   Passport as PassportData,
@@ -163,6 +168,24 @@ export function PassportView({
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedWeek]);
 
+  /**
+   * Open a week's detail sheet, and record that the student read it (FR-F3 / US-23).
+   *
+   * In the click handler rather than an effect on `selectedWeekNo`, deliberately.
+   * An effect would fire twice per open under StrictMode's double-invoke and
+   * inflate every count in the engagement report; a click happens once because a
+   * student clicked once. It would also re-fire on any re-render that re-ran the
+   * effect, which is a re-render, not a read.
+   *
+   * Not awaited: the sheet is already open by the time the request lands, and
+   * recordContentView swallows its own failures. Telemetry does not get to make a
+   * student wait, or fail.
+   */
+  function openWeek(weekNo: number) {
+    setSelectedWeekNo(weekNo);
+    void recordContentView(weekNo, "week_detail");
+  }
+
   async function handleCheckIn() {
     if (!onCheckIn || selectedWeek == null) return;
     if (!online) {
@@ -260,7 +283,7 @@ export function PassportView({
             <button
               type="button"
               className={`${styles.tile} ${styles[week.status]}`}
-              onClick={() => setSelectedWeekNo(week.weekNo)}
+              onClick={() => openWeek(week.weekNo)}
               aria-label={`Week ${week.weekNo}: ${week.title}, ${STATUS_LABEL[week.status]}`}
             >
               <div className={styles.tileTop}>

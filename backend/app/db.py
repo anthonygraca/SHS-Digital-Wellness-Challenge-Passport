@@ -24,6 +24,7 @@ def init_db() -> None:
     """Create tables, then seed demo data. Imports models so they register on Base."""
     from app.models import (
         challenge,  # noqa: F401
+        engagement,  # noqa: F401
         student,  # noqa: F401
         theme,  # noqa: F401
     )

@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ApiError } from "../../../api/http";
+import type { ChallengeSummary } from "../../../types/challenge";
 import type {
   AttendanceReport,
+  EngagementReport,
   ParticipationReport,
   WeekCompletion,
 } from "../../../types/report";
@@ -17,7 +19,9 @@ const navigate = vi.fn();
 const api = vi.hoisted(() => ({
   getParticipationReport: vi.fn(),
   getAttendanceReport: vi.fn(),
+  getEngagementReport: vi.fn(),
   exportPrizeCsv: vi.fn(),
+  listChallenges: vi.fn(),
 }));
 
 vi.mock("react-router-dom", () => ({
@@ -29,7 +33,14 @@ vi.mock("../../../api/reports", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../api/reports")>()),
   getParticipationReport: api.getParticipationReport,
   getAttendanceReport: api.getAttendanceReport,
+  getEngagementReport: api.getEngagementReport,
   exportPrizeCsv: api.exportPrizeCsv,
+}));
+// The challenge list feeds the selector only, and comes from the challenges
+// module rather than the reports one — it is the control's data, not a report.
+vi.mock("../../../api/challenges", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../api/challenges")>()),
+  listChallenges: api.listChallenges,
 }));
 
 // jsdom implements neither, and the export hands its blob to the browser through
@@ -66,10 +77,16 @@ beforeEach(() => {
   // implementation, this one included, and a createObjectURL returning undefined
   // fails as a wrong href rather than as a missing stub.
   createObjectURL.mockReturnValue(objectUrl);
-  // The two cards load together under one Promise.all, so a test about the
-  // funnel still needs attendance to resolve. Individual tests override.
+  // The three cards load together under one Promise.all, so a test about the
+  // funnel still needs attendance and engagement to resolve. Individual tests
+  // override. A fourth card added to that Promise.all needs a default here too,
+  // or every test in this file fails on the card it never mentions.
   api.getParticipationReport.mockResolvedValue(asReport());
   api.getAttendanceReport.mockResolvedValue(asAttendance());
+  api.getEngagementReport.mockResolvedValue(asEngagement());
+  // One published challenge by default: the selector only appears when there is a
+  // choice to make, so this keeps it out of the way of the card tests.
+  api.listChallenges.mockResolvedValue([asChallenge(1, "Fall 2026")]);
 });
 
 const asWeek = (week_no: number, completed_count: number): WeekCompletion => ({
@@ -107,6 +124,39 @@ const asAttendance = (over: Partial<AttendanceReport> = {}): AttendanceReport =>
     { method: "manual", count: 9 },
   ],
   ...over,
+});
+
+/**
+ * Views split across the two refs a student can meet content through, plus the
+ * guide's structural zero — the shape the report has until US-16 ships a guide.
+ */
+const asEngagement = (over: Partial<EngagementReport> = {}): EngagementReport => ({
+  challenge: {
+    id: 1,
+    name: "Stranger Things Wellness",
+    semester: "Fall 2026",
+    theme_id: "stranger-things",
+  },
+  total_content_views: 150,
+  content_views: [
+    { content_ref: "week_detail", count: 120 },
+    { content_ref: "tip", count: 30 },
+  ],
+  guide_sessions: 0,
+  ...over,
+});
+
+const asChallenge = (id: number, semester: string): ChallengeSummary => ({
+  id,
+  campus_id: "csub",
+  name: "Stranger Things Wellness",
+  semester,
+  start_date: "2026-09-01",
+  end_date: "2026-12-15",
+  theme_id: "stranger-things",
+  status: "published",
+  created_at: "2026-08-01T00:00:00Z",
+  updated_at: "2026-08-01T00:00:00Z",
 });
 
 /** The funnel rows, in the order they are rendered. */
@@ -498,5 +548,276 @@ describe("Prize-eligible CSV export (US-26 / FR-F5)", () => {
 
     // No challenge means no drawing — a button here could only 404.
     expect(screen.queryByRole("button", { name: /export prize/i })).toBeNull();
+  });
+});
+
+/** The content-view rows, in the order they are rendered. */
+const contentRows = () =>
+  within(screen.getByRole("list", { name: /content views by type/i })).getAllByRole(
+    "listitem",
+  );
+
+/** The sized fill of one content row's bar — a count made visible. */
+const contentFills = () =>
+  Array.from(
+    document.querySelectorAll<HTMLElement>(`.${styles.contentFill}`),
+  );
+
+describe("Engagement report (US-23 / FR-F3)", () => {
+  it("breaks content views down by what was viewed", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /content views by type/i });
+
+    // Week details first — the view a student chooses to make, and the order the
+    // API fixes. Counts, not percentages: the story asks how much students use
+    // the content, and 120 is that answer.
+    expect(contentRows().map((li) => li.textContent)).toEqual([
+      "Week details120",
+      "Tips after scan30",
+    ]);
+  });
+
+  it("reports the total the rows add up to", async () => {
+    render(<Reports />);
+
+    expect(await screen.findByText(/150 content views in total/i)).toBeInTheDocument();
+  });
+
+  it("sizes each bar to that ref's share of the views", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /content views by type/i });
+
+    expect(contentFills().map((el) => el.style.width)).toEqual(["80%", "20%"]);
+  });
+
+  it("says the guide is unavailable rather than showing a bare zero", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /content views by type/i });
+
+    // "0" next to "Guide chat sessions" reads as "nobody used it". Nobody *can*
+    // yet — the guide is US-16 — and those are different findings for an admin.
+    expect(
+      screen.getByText(/no guide sessions yet — the wellness guide isn’t available/i),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the guide count once sessions exist", async () => {
+    api.getEngagementReport.mockResolvedValue(asEngagement({ guide_sessions: 217 }));
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /content views by type/i });
+
+    // The zero above is a structural fact, not a hard-coded one: when US-16 starts
+    // writing sessions, this card shows them with no further change.
+    expect(screen.getByText("217")).toBeInTheDocument();
+    expect(screen.queryByText(/no guide sessions yet/i)).toBeNull();
+  });
+
+  it("a challenge with no views says so, not a row of zeroes", async () => {
+    api.getEngagementReport.mockResolvedValue(
+      asEngagement({
+        total_content_views: 0,
+        content_views: [
+          { content_ref: "week_detail", count: 0 },
+          { content_ref: "tip", count: 0 },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByText(/no content viewed yet/i);
+
+    expect(screen.queryByRole("list", { name: /content views by type/i })).toBeNull();
+    expect(screen.queryByText(/NaN/)).toBeNull();
+  });
+
+  it("counts one view as a view, not views", async () => {
+    api.getEngagementReport.mockResolvedValue(
+      asEngagement({
+        total_content_views: 1,
+        content_views: [
+          { content_ref: "week_detail", count: 1 },
+          { content_ref: "tip", count: 0 },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+
+    expect(await screen.findByText(/1 content view in total/i)).toBeInTheDocument();
+  });
+
+  it("refreshing picks up newly recorded views", async () => {
+    api.getEngagementReport
+      .mockResolvedValueOnce(asEngagement())
+      .mockResolvedValue(
+        asEngagement({
+          total_content_views: 160,
+          content_views: [
+            { content_ref: "week_detail", count: 130 },
+            { content_ref: "tip", count: 30 },
+          ],
+        }),
+      );
+
+    render(<Reports />);
+    expect(await screen.findByText(/150 content views in total/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    expect(await screen.findByText(/160 content views in total/i)).toBeInTheDocument();
+    expect(contentRows()[0]).toHaveTextContent("130");
+  });
+
+  it("a campus with nothing published shows no engagement card", async () => {
+    const notFound = new ApiError(
+      404,
+      "There's no active challenge for your campus right now.",
+    );
+    api.getParticipationReport.mockRejectedValue(notFound);
+    api.getAttendanceReport.mockRejectedValue(notFound);
+    api.getEngagementReport.mockRejectedValue(notFound);
+
+    render(<Reports />);
+
+    expect(await screen.findByText(/no published challenge yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/content views by type/i)).toBeNull();
+  });
+
+  it("a failed refresh keeps all three cards on screen", async () => {
+    api.getEngagementReport
+      .mockResolvedValueOnce(asEngagement())
+      .mockRejectedValue(new ApiError(500, "Server exploded"));
+
+    render(<Reports />);
+    expect(await screen.findByText(/150 content views in total/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    // One failed fetch takes the whole Promise.all down, so no card updates — and
+    // none is blanked. The funnel and attendance are still here despite the
+    // failure being on the engagement side.
+    expect(screen.getByText(/150 content views in total/i)).toBeInTheDocument();
+    expect(screen.getByText(/91 of 100/i)).toBeInTheDocument();
+    expect(screen.getByText("40 · 100%")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+const selector = () => screen.getByRole("combobox", { name: /challenge/i });
+
+const TWO_CHALLENGES = [asChallenge(1, "Fall 2026"), asChallenge(2, "Spring 2026")];
+
+describe("Challenge selector (US-23 / FR-F3)", () => {
+  it("offers no selector when there is only one published challenge", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /content views by type/i });
+
+    // The eyebrow already names it. A select with one option is a control that
+    // cannot do anything.
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("lists every published challenge once there is a choice", async () => {
+    api.listChallenges.mockResolvedValue(TWO_CHALLENGES);
+
+    render(<Reports />);
+
+    expect(
+      await screen.findByRole("option", { name: /spring 2026/i }),
+    ).toBeInTheDocument();
+    // "Active challenge" is the default: no challenge_id, so the dashboard keeps
+    // following the semester as it rolls over.
+    expect(selector()).toHaveValue("");
+    expect(screen.getByRole("option", { name: /active challenge/i })).toBeInTheDocument();
+  });
+
+  it("never offers a draft, which the server will not report on", async () => {
+    api.listChallenges.mockResolvedValue([
+      ...TWO_CHALLENGES,
+      { ...asChallenge(3, "Fall 2027"), status: "draft" },
+    ]);
+
+    render(<Reports />);
+    await screen.findByRole("option", { name: /spring 2026/i });
+
+    // Offering one would build a control that 404s the screen.
+    expect(screen.queryByRole("option", { name: /fall 2027/i })).toBeNull();
+  });
+
+  it("asks for no challenge id until one is chosen", async () => {
+    api.listChallenges.mockResolvedValue(TWO_CHALLENGES);
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /content views by type/i });
+
+    // undefined, not null or 0: the api layer omits the parameter entirely, which
+    // is what makes the server resolve the active challenge.
+    expect(api.getEngagementReport).toHaveBeenCalledWith(undefined);
+  });
+
+  it("moves all three cards to the challenge chosen", async () => {
+    api.listChallenges.mockResolvedValue(TWO_CHALLENGES);
+
+    render(<Reports />);
+    await screen.findByRole("option", { name: /spring 2026/i });
+    await userEvent.selectOptions(selector(), "2");
+
+    // The whole point of one selector rather than three: the cards can never end
+    // up describing different semesters.
+    expect(api.getParticipationReport).toHaveBeenLastCalledWith(2);
+    expect(api.getAttendanceReport).toHaveBeenLastCalledWith(2);
+    expect(api.getEngagementReport).toHaveBeenLastCalledWith(2);
+  });
+
+  it("shows the chosen challenge's numbers", async () => {
+    api.listChallenges.mockResolvedValue(TWO_CHALLENGES);
+    api.getEngagementReport
+      .mockResolvedValueOnce(asEngagement())
+      .mockResolvedValue(
+        asEngagement({
+          total_content_views: 12,
+          content_views: [
+            { content_ref: "week_detail", count: 9 },
+            { content_ref: "tip", count: 3 },
+          ],
+        }),
+      );
+
+    render(<Reports />);
+    await screen.findByText(/150 content views in total/i);
+
+    await userEvent.selectOptions(selector(), "2");
+
+    expect(await screen.findByText(/12 content views in total/i)).toBeInTheDocument();
+  });
+
+  it("exports the prize list for the challenge on screen, not the active one", async () => {
+    api.listChallenges.mockResolvedValue(TWO_CHALLENGES);
+    api.exportPrizeCsv.mockResolvedValue({
+      blob: new Blob(["student_id,sso_subject\n"], { type: "text/csv" }),
+      filename: "prize-eligible-Spring-2026-2.csv",
+    });
+    captureDownload();
+
+    render(<Reports />);
+    await screen.findByRole("option", { name: /spring 2026/i });
+    await userEvent.selectOptions(selector(), "2");
+    await userEvent.click(screen.getByRole("button", { name: /export prize/i }));
+
+    // A drawing run against the wrong semester has real prizes attached.
+    expect(api.exportPrizeCsv).toHaveBeenCalledWith(2);
+  });
+
+  it("keeps the dashboard when the challenge list fails to load", async () => {
+    api.listChallenges.mockRejectedValue(new ApiError(500, "Server exploded"));
+
+    render(<Reports />);
+
+    // The list is the control's own data, not part of the moment the cards
+    // describe. Losing it costs the selector, not the report.
+    expect(await screen.findByText(/150 content views in total/i)).toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

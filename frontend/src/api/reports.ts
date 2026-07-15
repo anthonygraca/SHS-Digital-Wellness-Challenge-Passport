@@ -1,4 +1,8 @@
-import type { AttendanceReport, ParticipationReport } from "../types/report";
+import type {
+  AttendanceReport,
+  EngagementReport,
+  ParticipationReport,
+} from "../types/report";
 import { ApiError } from "./http";
 
 // Relative path: proxied to FastAPI in dev, same-origin in prod.
@@ -38,32 +42,64 @@ function filenameFrom(disposition: string | null, fallback: string): string {
 }
 
 /**
- * Participation and the per-week completion funnel for the campus's active
- * challenge (FR-F1 / US-21). Throws ApiError(404) when nothing is published.
+ * `?challenge_id=N`, or nothing at all when no challenge is selected.
+ *
+ * Omitted rather than sent empty: the server reads a missing parameter as "the
+ * challenge running right now", which is what the dashboard shows before the
+ * selector has loaded and what every caller wanted before US-23 added one.
  */
-export function getParticipationReport(): Promise<ParticipationReport> {
-  return request<ParticipationReport>("/participation");
+function scope(challengeId?: number): string {
+  return challengeId === undefined ? "" : `?challenge_id=${challengeId}`;
 }
 
 /**
- * Auto-vs-manual attendance breakdown for the campus's active challenge
- * (FR-F2 / US-22). 404s on the same condition /participation does — both
- * resolve the same active challenge server-side.
+ * Participation and the per-week completion funnel (FR-F1 / US-21). Defaults to
+ * the campus's active challenge. Throws ApiError(404) when nothing is published,
+ * or when the requested challenge is not this campus's published one.
  */
-export function getAttendanceReport(): Promise<AttendanceReport> {
-  return request<AttendanceReport>("/attendance");
+export function getParticipationReport(
+  challengeId?: number,
+): Promise<ParticipationReport> {
+  return request<ParticipationReport>(`/participation${scope(challengeId)}`);
+}
+
+/**
+ * Auto-vs-manual attendance breakdown (FR-F2 / US-22). 404s on the same condition
+ * /participation does — every report route resolves its challenge the same way.
+ */
+export function getAttendanceReport(
+  challengeId?: number,
+): Promise<AttendanceReport> {
+  return request<AttendanceReport>(`/attendance${scope(challengeId)}`);
+}
+
+/**
+ * Content views and guide usage (FR-F3 / US-23). `challenge_id` is what US-23's
+ * "both can be viewed per challenge" asks for; it is accepted by every route here
+ * so the dashboard's cards always describe the same challenge.
+ */
+export function getEngagementReport(
+  challengeId?: number,
+): Promise<EngagementReport> {
+  return request<EngagementReport>(`/engagement${scope(challengeId)}`);
 }
 
 /**
  * The prize-eligible drawing list as a CSV file (FR-F5 / US-26). Throws
  * ApiError(404) when nothing is published, like the reports above.
  *
+ * Takes the same `challengeId` as the reports, and the dashboard passes it: the
+ * export is a record an admin acts on, and a drawing run against last semester's
+ * list because the download ignored the selector would be a real error.
+ *
  * Fetched rather than linked so the errors land in the app's own empty/alert
  * states instead of navigating the admin to a raw JSON page — and so the
  * session cookie and VITE_API_BASE are handled the same way as every other call.
  */
-export async function exportPrizeCsv(): Promise<{ blob: Blob; filename: string }> {
-  const res = await fetch(`${BASE}/prize-eligible.csv`, {
+export async function exportPrizeCsv(
+  challengeId?: number,
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(`${BASE}/prize-eligible.csv${scope(challengeId)}`, {
     credentials: "include",
   });
   if (!res.ok) await throwApiError(res);

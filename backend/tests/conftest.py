@@ -23,6 +23,10 @@ from app.models.challenge import (  # noqa: F401  (register on Base.metadata)
     CheckInAudit,
     Task,
 )
+from app.models.engagement import (  # noqa: F401  (register on Base.metadata)
+    ContentView,
+    GuideSession,
+)
 from app.models.student import Student  # noqa: F401  (register on Base.metadata)
 from app.models.theme import Theme  # noqa: F401  (register on Base.metadata)
 

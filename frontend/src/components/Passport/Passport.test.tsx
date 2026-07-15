@@ -32,6 +32,17 @@ vi.mock("./QrScanner", () => ({
     </button>
   ),
 }));
+// Partial mock: only the engagement write path is stubbed. The rest of the module
+// must stay real — the container's fetchPassport/checkIn/scanCheckIn are what these
+// tests drive through props. Without this stub, opening a week would fire a real
+// fetch at jsdom; it would be swallowed and harmless, but it would also be silent,
+// and US-23's instrumentation is worth asserting rather than assuming.
+const passportApi = vi.hoisted(() => ({ recordContentView: vi.fn() }));
+vi.mock("../../passport/passport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../passport/passport")>()),
+  recordContentView: passportApi.recordContentView,
+}));
+
 // The sheet mounts KnowledgeCheck with its real defaults, so stub the fetch it makes.
 // Defaults to no questions — most weeks have none, and that is the shape every other
 // test in this file assumes. KnowledgeCheck.test.tsx owns the quiz behaviour itself.
@@ -40,6 +51,7 @@ vi.mock("../../passport/assessments", () => assessments);
 
 beforeEach(() => {
   assessments.fetchWeekItems.mockResolvedValue([]);
+  passportApi.recordContentView.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -660,5 +672,49 @@ describe("Passport container scan wiring (US-8)", () => {
     expect(
       await screen.findByText(/4 of 7 complete, 3 remaining/i),
     ).toBeInTheDocument();
+  });
+});
+
+describe("PassportView content-view instrumentation (US-23 / FR-F3)", () => {
+  it("records a view when a week's detail sheet is opened", async () => {
+    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
+
+    // The engagement report counts nothing unless this fires — it is the only
+    // thing that puts a week_detail row in the table.
+    expect(passportApi.recordContentView).toHaveBeenCalledTimes(1);
+    expect(passportApi.recordContentView).toHaveBeenCalledWith(4, "week_detail");
+  });
+
+  it("records a second view when the same week is opened again", async () => {
+    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
+
+    // Views, not viewers: re-reading a week is engagement, not a duplicate. The
+    // API has no unique constraint for exactly this reason.
+    expect(passportApi.recordContentView).toHaveBeenCalledTimes(2);
+  });
+
+  it("records nothing when no week is opened", async () => {
+    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+
+    // Guards against instrumenting a render rather than a read — an effect on the
+    // selected week would fire here, and twice per open under StrictMode.
+    expect(passportApi.recordContentView).not.toHaveBeenCalled();
+  });
+
+  it("opens the sheet even when recording the view fails", async () => {
+    passportApi.recordContentView.mockRejectedValue(new Error("offline"));
+    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
+
+    // Telemetry does not get to break a student's passport. A lost view costs the
+    // admin one count; a thrown one would cost the student their week.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

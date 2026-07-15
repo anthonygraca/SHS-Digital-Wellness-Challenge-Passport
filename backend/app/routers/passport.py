@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import require_current_student
 from app.db import get_db
+from app.schemas.engagement import ContentViewCreate
 from app.schemas.passport import (
     CheckInRequest,
     CheckInResult,
@@ -13,6 +14,7 @@ from app.schemas.passport import (
     ThemeConfigOut,
     WeekOut,
 )
+from app.services import engagement as engagement_svc
 from app.services.passport import (
     DuplicateCheckIn,
     InvalidEventToken,
@@ -135,6 +137,20 @@ def scan_checkin(
 
     week_no = task.position
     title = task.title
+
+    # The tip is a piece of content this route is about to deliver, so this route
+    # is the only place that honestly knows it was delivered (FR-F3 / US-23). The
+    # client is never asked to report it back: a POST it could drop, retry, or
+    # never send would make the engagement report a measure of the client rather
+    # than of the tip.
+    #
+    # Only the scan path. A manual check-in returns a bare passport with no tip
+    # (create_checkin below), so "tip" counts tips shown, which today means scans
+    # — not check-ins.
+    engagement_svc.record_content_view_for_task(
+        db, student_id=student_id, task=task, content_ref="tip"
+    )
+
     view = build_passport(db, campus_id=campus_id, student_id=student_id)
     if view is None:
         # Unreachable in practice: the check-in only succeeds when an active
@@ -176,3 +192,36 @@ def create_checkin(
             status_code=status.HTTP_404_NOT_FOUND, detail="No active challenge"
         )
     return _to_passport_out(view)
+
+
+@router.post("/api/content-views", status_code=status.HTTP_204_NO_CONTENT)
+def create_content_view(
+    payload: ContentViewCreate,
+    claims: dict = Depends(require_current_student),
+    db: Session = Depends(get_db),
+):
+    """Record that the student looked at a week's content (FR-F3 / US-23).
+
+    Opening a week's detail sheet is state that only exists in the browser, so
+    unlike the tip — which the scan route writes itself — this one has to be
+    reported. UC-6 is what makes it worth counting: it names "opening a week"
+    alongside a check-in as the moment a student meets content.
+
+    Gated on current-student eligibility like every other student route, and
+    404s on an unknown week. Both matter more here than the 204 suggests: this is
+    the app's one endpoint whose whole job is to increment a number an admin will
+    later read as a fact, so an ineligible caller or a made-up week number must
+    not be able to move it.
+
+    204 rather than the refreshed passport: nothing about the student's progress
+    changed, and the client fires this without waiting for the answer.
+    """
+    view = engagement_svc.record_content_view(
+        db,
+        campus_id=claims["campus_id"],
+        student_id=claims["student_id"],
+        week_no=payload.weekNo,
+        content_ref=payload.contentRef,
+    )
+    if view is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such week")

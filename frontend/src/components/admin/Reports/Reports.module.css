@@ -1,8 +1,12 @@
-/* Reporting dashboard (FR-F1 / US-21, FR-F5 / US-26) — screen A1 of the design
-   prototype: an enrolled-count tile above a per-week completion funnel of
-   horizontal bars, with the prize-list export on the title row.
+/* Reporting dashboard (FR-F1 / US-21, FR-F2 / US-22, FR-F3 / US-23, FR-F5 / US-26)
+   — screen A1 of the design prototype: an enrolled-count tile above a per-week
+   completion funnel of horizontal bars, with the prize-list export on the title
+   row, then the attendance and engagement cards.
    Mobile-first: the prototype's desktop columns become one stacked column on a
-   phone, with the funnel card full width at every size. */
+   phone, with every card full width at every size.
+   The prototype has no engagement card to copy — it draws FR-F1/F2/F4 and labels
+   the set "FR-F1–F5". So this card is built from the attendance card's grammar
+   (fixed label rail, fluid bar, fixed value rail) rather than invented. */
 
 .page {
   min-height: 100dvh;
@@ -197,7 +201,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .fill,
-  .stackAuto { transition: none; }
+  .stackAuto,
+  .contentFill { transition: none; }
 }
 
 .value {
@@ -289,6 +294,135 @@
   color: var(--wp-on-surface-variant);
   margin: 0;
 }
+
+/* ── Engagement (FR-F3 / US-23) ───────────────────────────────── */
+/* Card chrome matches .funnelCard and .attendanceCard — peers on one dashboard. */
+.engagementCard {
+  background: var(--wp-surface-container);
+  border-radius: 20px;
+  padding: 20px;
+  margin-top: 16px;
+}
+
+.contentList {
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+}
+
+/* Label | fluid bar | count, the same three-rail shape as .funnelRow. The label
+   rail is wider than the funnel's because these names are words, not "Week 3",
+   and it is fixed so the bars stay comparable down the column. */
+.contentRow {
+  display: grid;
+  grid-template-columns: 96px 1fr 40px;
+  align-items: center;
+  gap: 10px;
+}
+
+.contentLabel {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+}
+
+.contentBar {
+  height: 22px;
+  border-radius: 6px;
+  background: var(--wp-surface-container-high);
+  overflow: hidden;
+}
+
+.contentFill {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--wp-primary);
+  /* A ref nobody triggered still shows a sliver, so the row reads as an empty
+     bar rather than a missing one — the same rule .fill follows. */
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+
+.contentValue {
+  text-align: right;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.contentTotal {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+  margin: 12px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.engagementEmpty {
+  font-size: 13px;
+  color: var(--wp-on-surface-variant);
+  margin: 0;
+}
+
+/* The guide sits under a rule rather than in its own card: it is the second half
+   of one engagement story, and a card of its own would give a number that is
+   structurally 0 the same weight as the whole funnel. */
+.guideRow {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--wp-outline-variant);
+}
+
+.guideLabel {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.guideValue {
+  font-family: var(--wp-font-display);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.guideEmpty {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+  margin: 0;
+}
+
+/* ── Challenge selector (US-23) ───────────────────────────────── */
+/* A native select: on a phone it opens the OS picker, which beats any listbox we
+   would build, and it is a real 44px target without extra chrome. */
+.fieldGroup {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.fieldLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--wp-on-surface-variant);
+}
+
+.select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--wp-outline);
+  border-radius: 12px;
+  background: var(--wp-surface-container);
+  color: var(--wp-on-surface);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.select:focus-visible { outline: 2px solid var(--wp-primary); outline-offset: 1px; }
 
 /* ── States ───────────────────────────────────────────────────── */
 .empty {

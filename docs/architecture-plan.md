@@ -269,6 +269,51 @@ for it. Worth knowing before US-19 adds the reflection surface and meets the sam
 also assumes a fuller Material 3 token set (`--wp-secondary-container` and friends) that
 `theme/tokens.css` does not define, and an undefined custom property is not a fallback, it is nothing.
 
+**As built (US-23 / FR-F3).** `ContentView` ships as the sketch above reserved it — `(student_id,
+task_id, content_ref, ts)` in `models/engagement.py` — plus a `GuideSession(student_id, challenge_id,
+started_at)` the sketch never named, because §10 promises "ContentViews + chat sessions per student"
+and a chat session had nowhere to live. Four things are not readable off the schema:
+
+**This is the app's first write-side instrumentation, and that is a category difference.** Every other
+report counts rows some feature wrote for its own reasons — a `CheckIn` exists whether or not anyone
+reports on it. A `ContentView` exists *only* because the report wants it, which is why US-23 owns the
+write paths and not just a query. The consequence to keep in mind: a bug in the instrumentation is
+invisible in the product and only ever shows up as a number that is quietly wrong.
+
+**The two content refs are recorded by different halves of the app, deliberately.** `tip` is written
+server-side by the scan route, because that route composes and returns the tip and so is the only
+thing that honestly knows one was delivered; a client-reported count would measure the client. Only
+`week_detail` is posted (`POST /api/content-views`), because opening a sheet is state that exists
+nowhere else. UC-6's trigger — "a successful check-in, **or opening a week**" — is what authorizes
+counting it. Note the honest limit: the tip fires only on the scan path, so `tip` counts scans, not
+check-ins.
+
+**`ContentView` has no unique constraint, unlike `uq_checkin_student_task`.** A week can be completed
+once but read any number of times, and re-reading is engagement rather than a duplicate to reject. So
+the grain matches the attendance report's `count(*)`: views, not viewers. It also scopes through
+`task_id` rather than carrying `challenge_id`, exactly as `CheckIn` does, so the join through `Task`
+is what enforces campus isolation. `GuideSession` carries `challenge_id` directly because a chat is
+not about a week and has no task to inherit scope from.
+
+**`guide_sessions` is a structural 0 until US-16.** Nothing mints a `GuideSession` — there is no
+conversational guide yet, and no LLM client anywhere in the backend. The table, the query, the report
+field and the card row all exist and are exercised by direct-inserted rows, so US-16 only has to write
+one. The zero is reported rather than omitted for the reason `AttendanceReportOut` reports `staff: 0`:
+it says the path FR-F3 anticipates is not yet wired, which an admin should be able to read rather than
+infer. The card says so in words, because "0" beside "Guide chat sessions" reads as "nobody used it"
+when the truth is that nobody can.
+
+**The reports gained a challenge selector (US-23).** Only US-23's Gherkin says "both can be viewed per
+challenge", but `challenge_id` is an optional query param on *all four* routes under `/api/reports`
+(participation, attendance, engagement, and the prize CSV), and one control on the dashboard drives
+them. The resolver is shared for the same reason it always was — two cards on one dashboard must never
+disagree about which challenge they describe — and the export follows it because a drawing run against
+the wrong semester has real prizes attached. Omitting the param keeps the old behaviour exactly (the
+campus's active challenge), and an explicit id is held to the same published-only rule: the parameter
+selects, it does not unlock a draft. A cross-campus id is a 404, not a 403, so a report cannot be used
+to probe which ids exist elsewhere. Side effect worth having: a past semester is reportable at all,
+which it was not before.
+
 **Theme is data, not code (R6 / NFR-6).** `Theme.id` is a slug that doubles as the SPA's
 `data-theme` value, so a theme's static token block still skins the app if its row is missing.
 `palette_json` maps a CSS custom-property suffix to its value (`{"primary": "#ff4438"}`), which the
