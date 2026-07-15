@@ -1,1 +1,7 @@
 .DS_Store
+
+# Local deployment identifiers (account ids, instance ids, hostnames, secrets).
+# Never commit — this repo is public. The template is the one exception: it is
+# committed so a fresh clone has something to fill in, and lib.sh points at it.
+.deploy-local/*
+!.deploy-local/env.example

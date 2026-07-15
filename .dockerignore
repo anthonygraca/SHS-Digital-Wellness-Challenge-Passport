@@ -20,8 +20,12 @@ backend/tests
 # reads its DB from the /data volume instead.
 backend/*.db
 
-# Secrets. There is no .env in the repo today; this makes sure one never rides
-# into an image if someone adds it locally.
+# Secrets. .deploy-local/env holds real account ids and the deployment's signing
+# secrets; nothing in the Dockerfile copies it today, but keeping it out of the
+# build context means a future COPY cannot leak it. **/.env covers a local .env
+# if someone adds one — note it does NOT match .deploy-local/env, which is why
+# that path is listed separately.
+.deploy-local
 **/.env
 
 # Node: npm ci rebuilds these from the lockfile inside the image, and a host
