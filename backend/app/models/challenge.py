@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -211,6 +212,64 @@ class AssessmentItem(Base):
     )
 
     task: Mapped[Task] = relationship("Task", back_populates="assessment_items")
+
+
+class AssessmentResponse(Base):
+    """A student's answer to an assessment item, with its score (FR-E4).
+
+    architecture-plan.md §5 calls this ``QuizResponse``; the implemented item model
+    is ``AssessmentItem``, so the name follows the code.
+
+    The learning-outcome tag is reached by joining ``item``, never copied here.
+    ``CheckInAudit`` below denormalizes for a reason that does not apply to this
+    table: it carries no foreign keys and must outlive the rows it describes,
+    whereas a response cannot outlive its item (the FK cascades). Copying the tag
+    would instead fork history — an admin editing ``AssessmentItem.outcome_tag``
+    (US-12) would leave old responses filed under the old tag, so the FR-F4
+    per-outcome report would count one item under two tags with no right answer.
+    Joining means retagging an item retags its whole score history, which is what
+    retagging an item means.
+
+    The unique pair makes an MCQ one attempt, mirroring ``CheckIn`` above. That is
+    load-bearing rather than tidy: the FR-E4 feedback names the correct option, so
+    without it "answer wrong, read the answer, answer again" would make every
+    stored score a 1.0 and the FR-F4 aggregate a flat line.
+    """
+
+    __tablename__ = "assessment_responses"
+    __table_args__ = (
+        UniqueConstraint(
+            "student_id", "assessment_item_id", name="uq_response_student_item"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    assessment_item_id: Mapped[int] = mapped_column(
+        ForeignKey("assessment_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # The chosen option string for an MCQ; the essay text for a reflection (US-19).
+    response: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # 0.0..1.0. Float rather than Integer because FR-F4 aggregates a *mean* per
+    # outcome tag, and US-19's rubric scoring is fractional — one column serves both.
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # "auto" | "human". Always "auto" on this branch; US-19's admin override writes
+    # "human". Present now because the column is NOT NULL and there is no Alembic —
+    # adding it later would mean dropping every existing database.
+    scored_by: Mapped[str] = mapped_column(String(16), nullable=False, default="auto")
+
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    item: Mapped[AssessmentItem] = relationship("AssessmentItem")
 
 
 class CheckInAudit(Base):

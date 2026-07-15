@@ -230,6 +230,45 @@ a student's own passport check-in also writes `manual`; the admin override is id
 and the app never enables it, so the `ondelete="CASCADE"` declarations elsewhere are currently inert
 and would only start firing on Postgres — the FK-free ledger is correct under both.
 
+**As built (US-18 / FR-E4).** The sketch above says `QuizItem` / `QuizResponse`; the shipped models
+are `AssessmentItem` (US-12) and `AssessmentResponse`, both in `models/challenge.py`. The name follows
+the code. Five decisions are not readable off it:
+
+**The outcome tag is joined, not copied onto the response.** `AssessmentResponse` reaches its tag
+through `assessment_item_id`. Denormalizing it — as `CheckInAudit` does `campus_id` — looks
+symmetrical and is wrong here: that ledger carries no FKs and must outlive its referents, whereas a
+response cascade-deletes with its item and can never outlive it. The decisive case is US-12's
+`AssessmentItemUpdate`, which lets an admin edit `outcome_tag`. A copied tag would leave old scores
+filed under the old tag, so the learning-outcome report below would count one item under two tags with
+no principled answer for which is right. Joining means retagging an item retags its whole score
+history — which is what retagging an item means.
+
+**An MCQ is one attempt** (`uq_response_student_item`, 409 on a second), and this is load-bearing
+rather than tidy. It is paired with the decision below and neither survives alone: the instant
+feedback names the correct option, so retries would make every stored score a 1.0 and flatten the
+learning-outcome aggregate into noise. If retries are ever wanted, the constraint is what has to go,
+and the report must then average *first* attempts only.
+
+**The feedback names the correct option**, because a verdict alone teaches nothing and FR-E4 exists to
+teach. It is composed server-side (the client never holds the key) and templated, not generated —
+AI-authored feedback against a rubric is US-19 / FR-E5. `ai_feedback` is deliberately absent from the
+model: it is nullable, so US-19 adds it additively at no cost, whereas a column nothing can write is
+just debt. `scored_by` went in now for the opposite reason — it is `NOT NULL`, there is no Alembic,
+and adding it later would mean dropping every existing database.
+
+**The student never receives `answer_key`.** `AssessmentItemOut` carries it and `TaskOut` embeds it;
+that is safe only because every route serving them is admin-gated. The student surface has its own
+`KnowledgeCheckItemOut` with no such field *at all*, so it cannot leak one even when built from an ORM
+item — a leaked key makes auto-scoring theatre, since the client could score itself. The regression
+test asserts on shape, not on the absence of the answer text: the correct option is necessarily in the
+body, being one of the four the student picks between. What must not be there is anything marking it.
+
+**The quiz lives in the week sheet, not on a route.** The design mockup's S6 screen hangs off a "Learn"
+tab in a bottom nav this app does not have, so a standalone screen would need an entry point invented
+for it. Worth knowing before US-19 adds the reflection surface and meets the same wall — the mockup
+also assumes a fuller Material 3 token set (`--wp-secondary-container` and friends) that
+`theme/tokens.css` does not define, and an undefined custom property is not a fallback, it is nothing.
+
 **Theme is data, not code (R6 / NFR-6).** `Theme.id` is a slug that doubles as the SPA's
 `data-theme` value, so a theme's static token block still skins the app if its row is missing.
 `palette_json` maps a CSS custom-property suffix to its value (`{"primary": "#ff4438"}`), which the

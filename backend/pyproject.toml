@@ -32,11 +32,13 @@ include = ["app*"]
 markers = [
     "FR_B6: duplicate a prior challenge",
     "FR_D6: manual completion override + audit",
+    "FR_E4: MCQ auto-scoring against the answer key",
     "FR_F1: participation & completion funnel report",
     "FR_F2: auto-vs-manual attendance report",
     "FR_F5: prize-eligible CSV export",
     "audit: writes or asserts the audit trail",
     "source_UC_5: traces to use case UC-5",
+    "source_UC_8: traces to use case UC-8",
     "source_UC_10: traces to use case UC-10",
     "source_UC_11: traces to use case UC-11",
 ]

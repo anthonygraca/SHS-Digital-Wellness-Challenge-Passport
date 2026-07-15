@@ -16,6 +16,7 @@ import type {
 import { useTheme } from "../../theme/ThemeProvider";
 import { resolveThemeCopy } from "../../theme/themes";
 import { BoltIcon, CheckCircleIcon, LockIcon, TrophyIcon } from "../icons";
+import { KnowledgeCheck } from "./KnowledgeCheck";
 import { QrScanner } from "./QrScanner";
 import styles from "./Passport.module.css";
 
@@ -320,6 +321,12 @@ export function PassportView({
                 <dd>{selectedWeek.prize}</dd>
               </div>
             </dl>
+
+            {/* Renders nothing when the week has no questions, which is most weeks.
+                Deliberately does not gate the check-in below: FR-E4 says nothing about
+                coupling them, and doing so would change the UC-3 core loop. Offline it
+                refuses to submit rather than queueing, same as check-in (US-6). */}
+            <KnowledgeCheck weekNo={selectedWeek.weekNo} online={online} />
 
             {selectedWeek.status === "complete" ? (
               <button type="button" className={styles.checkedIn} disabled>
