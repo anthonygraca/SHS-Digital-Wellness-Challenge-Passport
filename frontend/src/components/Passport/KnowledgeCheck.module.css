@@ -1,11 +1,12 @@
 /*
  * Knowledge check inside the week sheet (US-18 / FR-E4).
  *
- * Correct is signalled with --wp-tertiary, not --wp-primary, and incorrect with
- * --wp-error-container rather than --wp-error. In the Stranger dark palette --wp-error
- * and --wp-primary are the same salmon (#FFB4AB), so the obvious primary/error pairing
- * would render both verdicts identically. --wp-tertiary is already the app's success
- * colour — completed week tiles and the check-in confirmation both use it.
+ * Correct is --wp-tertiary, which is already this app's success colour: completed
+ * week tiles and the "Checked in" button both use it, so a right answer reads the
+ * same as any other thing that went well. --wp-primary is the *action* colour here
+ * (the submit button, the current selection) and would say "do this" rather than
+ * "you got it". Every colour below is a theme token, so a semester re-skin (US-13)
+ * carries the quiz with it and no value is hardcoded.
  */
 
 .section {
@@ -32,12 +33,16 @@
   margin-top: 12px;
 }
 
+/* --wp-secondary / --wp-on-secondary, not the mockup's --wp-secondary-container
+   pairing: the container tokens are part of the fuller Material 3 set the mockup
+   draws on, and this app's themes (theme/tokens.css, services/seed.py) do not
+   define them. An undefined custom property is not a fallback, it is nothing. */
 .tag {
   display: inline-block;
   padding: 5px 10px;
   border-radius: 8px;
-  background: var(--wp-secondary-container);
-  color: var(--wp-on-secondary-container);
+  background: var(--wp-secondary);
+  color: var(--wp-on-secondary);
   font-size: 11px;
   font-weight: 600;
   margin-bottom: 10px;
