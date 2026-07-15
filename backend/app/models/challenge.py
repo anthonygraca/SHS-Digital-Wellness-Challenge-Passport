@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
@@ -105,6 +106,12 @@ class Task(Base):
     )
 
     challenge: Mapped[Challenge] = relationship("Challenge", back_populates="tasks")
+    assessment_items: Mapped[list[AssessmentItem]] = relationship(
+        "AssessmentItem",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class CheckIn(Base):
@@ -161,3 +168,46 @@ class Enrollment(Base):
     enrolled_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
+
+
+class AssessmentItem(Base):
+    """An assessment item attached to a task (FR-B3).
+
+    Supports two item types:
+    - ``mcq``        — multiple-choice question with an answer key
+    - ``reflection`` — open-ended prompt with a grading rubric
+
+    Each item is tagged to a learning outcome (``outcome_tag``) for later
+    aggregate reporting.
+    """
+
+    __tablename__ = "assessment_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # "mcq" | "reflection"
+    item_type: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    # Shared fields
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    outcome_tag: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # MCQ-specific: ordered list of option strings, e.g. ["A", "B", "C", "D"]
+    options: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # MCQ-specific: the correct answer, e.g. "B"
+    answer_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Reflection-specific: free-text rubric used for grading
+    rubric: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    task: Mapped[Task] = relationship("Task", back_populates="assessment_items")

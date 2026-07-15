@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Annotated
+
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_admin
 from app.db import get_db
 from app.schemas.challenge import (
+    AssessmentItemCreate,
+    AssessmentItemOut,
+    AssessmentItemUpdate,
     ChallengeCreate,
     ChallengeOut,
     ChallengeSummary,
@@ -170,3 +175,88 @@ def reorder_tasks(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Assessment item endpoints (FR-B3)
+# ---------------------------------------------------------------------------
+
+
+def _get_item_or_404(db: Session, task_id: int, item_id: int):
+    item = svc.get_assessment_item(db, task_id, item_id)
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Assessment item not found"
+        )
+    return item
+
+
+@router.post(
+    "/{challenge_id}/tasks/{task_id}/items",
+    response_model=AssessmentItemOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_assessment_item(
+    challenge_id: int,
+    task_id: int,
+    body: Annotated[AssessmentItemCreate, Body()],
+    claims: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Attach an MCQ or reflection item to a task tagged to a learning outcome (FR-B3)."""
+    _get_challenge_or_404(db, claims["campus_id"], challenge_id)
+    task = _get_task_or_404(db, challenge_id, task_id)
+    return svc.add_assessment_item(db, task, body)
+
+
+@router.get(
+    "/{challenge_id}/tasks/{task_id}/items",
+    response_model=list[AssessmentItemOut],
+)
+def list_assessment_items(
+    challenge_id: int,
+    task_id: int,
+    claims: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """List all assessment items attached to a task."""
+    _get_challenge_or_404(db, claims["campus_id"], challenge_id)
+    _get_task_or_404(db, challenge_id, task_id)
+    return svc.list_assessment_items(db, task_id)
+
+
+@router.patch(
+    "/{challenge_id}/tasks/{task_id}/items/{item_id}",
+    response_model=AssessmentItemOut,
+)
+def update_assessment_item(
+    challenge_id: int,
+    task_id: int,
+    item_id: int,
+    body: AssessmentItemUpdate,
+    claims: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Edit an assessment item's attributes."""
+    _get_challenge_or_404(db, claims["campus_id"], challenge_id)
+    _get_task_or_404(db, challenge_id, task_id)
+    item = _get_item_or_404(db, task_id, item_id)
+    return svc.update_assessment_item(db, item, body)
+
+
+@router.delete(
+    "/{challenge_id}/tasks/{task_id}/items/{item_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_assessment_item(
+    challenge_id: int,
+    task_id: int,
+    item_id: int,
+    claims: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Remove an assessment item from a task."""
+    _get_challenge_or_404(db, claims["campus_id"], challenge_id)
+    _get_task_or_404(db, challenge_id, task_id)
+    item = _get_item_or_404(db, task_id, item_id)
+    svc.delete_assessment_item(db, item)

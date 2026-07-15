@@ -378,3 +378,88 @@
   font-size: 13px;
   margin-bottom: 12px;
 }
+
+/* ── Assessment items panel (FR-B3 / US-12) ───────────────────── */
+.modalWide {
+  max-width: 640px;
+}
+
+.itemList {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+}
+
+.assessmentItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--wp-surface);
+  border: 1px solid var(--wp-outline-variant);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.itemBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.itemTypeBadge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--wp-primary) 14%, transparent);
+  color: var(--wp-primary);
+  margin-right: 6px;
+}
+
+.outcomeBadge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--wp-tertiary, #7c5800) 14%, transparent);
+  color: var(--wp-tertiary, #7c5800);
+}
+
+.itemPrompt {
+  margin: 6px 0 2px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.itemMeta {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+  margin-top: 2px;
+}
+
+/* ── Assessment item form ─────────────────────────────────────── */
+.itemForm {
+  border-top: 1px solid var(--wp-outline-variant);
+  padding-top: 16px;
+  margin-top: 12px;
+}
+
+.itemForm h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+
+.optionRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.optionRow input {
+  flex: 1;
+}
