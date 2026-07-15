@@ -1,0 +1,231 @@
+/* Live event dashboard (FR-D4 / US-28) — screen A6 of the design prototype:
+   event QR card, live check-in count on a primary-container card, and a
+   recent-check-ins feed. Mobile-first: one column on a phone, the design's
+   two-column grid from 720px up. */
+
+.page {
+  min-height: 100dvh;
+  background: var(--wp-surface);
+  color: var(--wp-on-surface);
+  padding: 0 0 64px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--wp-surface-container);
+  border-bottom: 1px solid var(--wp-outline-variant);
+  gap: 12px;
+}
+
+.backBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 4px 8px 4px 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--wp-on-surface-variant);
+  font-size: 14px;
+  cursor: pointer;
+}
+.backBtn:hover { background: color-mix(in srgb, var(--wp-on-surface) 8%, transparent); }
+.backBtn:focus-visible { outline: 2px solid var(--wp-primary); }
+
+.content {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.title {
+  font-family: var(--wp-font-display);
+  font-size: 30px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.subtitle {
+  font-size: 13.5px;
+  color: var(--wp-on-surface-variant);
+  margin: 0 0 24px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+
+@media (min-width: 720px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+.cardLabel {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+
+/* ── Event QR card ────────────────────────────────────────────── */
+.qrCard {
+  background: var(--wp-surface-container);
+  border-radius: 20px;
+  padding: 24px;
+  text-align: center;
+}
+
+.qrCard .cardLabel {
+  margin-bottom: 16px;
+}
+
+.qrBox {
+  width: 210px;
+  height: 210px;
+  margin: 0 auto;
+  border-radius: 16px;
+  background: #fff; /* QR must stay dark-on-light to remain scannable in any theme */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Live count card ──────────────────────────────────────────── */
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.countCard {
+  background: var(--wp-primary-container);
+  color: var(--wp-on-primary-container);
+  border-radius: 20px;
+  padding: 24px;
+}
+
+.count {
+  font-family: var(--wp-font-display);
+  font-size: 64px;
+  font-weight: 700;
+  line-height: 1;
+  margin: 6px 0;
+}
+
+.liveRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.liveRow svg {
+  animation: liveOpsPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes liveOpsPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liveRow svg { animation: none; }
+}
+
+.overrideBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--wp-on-primary-container) 14%, transparent);
+  color: var(--wp-on-primary-container);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 14px;
+}
+.overrideBtn:hover {
+  background: color-mix(in srgb, var(--wp-on-primary-container) 22%, transparent);
+}
+.overrideBtn:focus-visible {
+  outline: 3px solid var(--wp-on-primary-container);
+  outline-offset: 2px;
+}
+
+/* ── Recent check-ins card ────────────────────────────────────── */
+.recentCard {
+  background: var(--wp-surface-container);
+  border-radius: 20px;
+  padding: 18px;
+}
+
+.recentCard .cardLabel {
+  margin-bottom: 12px;
+}
+
+.recentList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.recentRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--wp-outline-variant);
+  font-size: 13px;
+}
+.recentRow:last-child { border-bottom: none; }
+
+.recentIcon {
+  display: flex;
+  color: var(--wp-tertiary);
+  flex-shrink: 0;
+}
+
+.recentWho {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recentTime {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+  flex-shrink: 0;
+}
+
+.recentEmpty {
+  font-size: 13px;
+  color: var(--wp-on-surface-variant);
+  margin: 0;
+  padding: 8px 0;
+}
+
+/* ── States ───────────────────────────────────────────────────── */
+.empty {
+  text-align: center;
+  color: var(--wp-on-surface-variant);
+  padding: 40px 0;
+  font-size: 15px;
+}
+
+.error {
+  color: var(--wp-error);
+  font-size: 13px;
+  margin: 0 0 12px;
+}

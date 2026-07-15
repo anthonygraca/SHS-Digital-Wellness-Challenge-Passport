@@ -309,26 +309,6 @@
   justify-content: flex-end;
 }
 
-/* Event check-in QR (US-8) — printed/displayed under each task for students to scan. */
-.taskQr {
-  margin-top: 10px;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px;
-  width: fit-content;
-  background: #fff; /* QR must stay dark-on-light to remain scannable in any theme */
-  border: 1px solid var(--wp-outline-variant);
-  border-radius: 8px;
-}
-
-.taskQrCaption {
-  font-size: 11px;
-  font-weight: 600;
-  color: #333;
-}
-
 .reqBadge {
   font-size: 10px;
   font-weight: 700;
