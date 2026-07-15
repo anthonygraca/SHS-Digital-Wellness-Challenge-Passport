@@ -180,10 +180,12 @@ function outcomeLabel(tag: string): string {
  * have not landed yet is a real finding too; it just is not a score, so it does not
  * get a score's shape. Same instinct as the guide row above.
  *
- * The API also ships human_scored_count, 0 everywhere until US-19's override lands.
- * The card stays silent while it is 0 rather than drawing a permanently-empty
- * provenance badge — the zero is a fact about the API, and an admin reading this
- * screen has nothing to do about it until reflections can be overridden at all.
+ * Hand-scored responses are counted in the totals like any other — an overridden score
+ * is a score, which is US-24's second scenario. The count is named only once it is
+ * non-zero: an admin who has never overridden anything is owed no vocabulary for it,
+ * and a permanently-empty "0 hand-scored" would cost attention it never repays. Once
+ * US-19's override has been used, though, how much of an outcome's mean a human set is
+ * exactly the context that stops an admin over-reading it — so it says so.
  */
 function OutcomesCard({ report }: { report: LearningOutcomeReport }) {
   // Split, not filtered: both halves are rendered, in different shapes.
@@ -235,6 +237,8 @@ function OutcomesCard({ report }: { report: LearningOutcomeReport }) {
             {report.total_responses}{" "}
             {report.total_responses === 1 ? "response" : "responses"} ·{" "}
             {percent(report.mean_score ?? 0, 1)}% average
+            {report.total_human_scored > 0 &&
+              ` · ${report.total_human_scored} hand-scored`}
           </p>
 
           {unanswered.length > 0 && (

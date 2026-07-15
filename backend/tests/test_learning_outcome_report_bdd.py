@@ -14,26 +14,28 @@ a response can be filed against one — so the autouse fixture builds *that* wor
 the Givens put the scores in it. The split follows what the scenarios say: they are
 about responses, not about authoring a challenge.
 
-The MCQ responses are seeded by *really* submitting them, through the same route a
-student's browser posts to. Writing AssessmentResponse rows directly would prove the
-query and nothing else; the claim behind FR-F4 is that the scores students actually
-earn reach the report, and only driving the real route shows it.
+Every response here is seeded by *really* submitting it, through the same routes a
+student's browser and an admin's dashboard post to — the MCQ answers through
+POST /items/{id}/responses, the reflections through POST /items/{id}/reflections, and
+the overrides through the admin PATCH US-19 added. Writing AssessmentResponse rows
+directly would prove the query and nothing else; the claim behind FR-F4 is that the
+scores students actually earn reach the report, and only driving the real routes
+shows it.
 
-The human-overridden reflections are the exception, and are direct-inserted. Nothing
-writes scored_by="human" until the reflection override lands (US-19 / FR-E5), so
-there is no route to drive. This is the same move test_engagement_report_bdd.py makes
-for its guide sessions and for the same reason: without a row the scenario would pass
-against a column no report ever reads, and "the overridden scores are reflected in
-the totals" would be satisfied by an aggregate that silently dropped them.
+That the overrides go through the real route is new. US-24 was written while US-19 was
+still unmerged, when nothing could write scored_by="human" and the rows had to be
+hand-inserted — the move test_engagement_report_bdd.py still makes for its guide
+sessions, because a GuideSession genuinely has no writer. The exception ends the
+moment a route exists, and one does. The scenario is stronger for it: the reflections
+are AI-scored first and overridden second, so the aggregate has to reflect the human
+value rather than the score the reflection originally earned, which no hand-written
+row could have shown.
 """
 
 from __future__ import annotations
 
 import pytest
 from pytest_bdd import given, scenarios, then, when
-
-from app.models.challenge import AssessmentResponse
-from app.models.student import Student
 
 # Binds every scenario in the file to this module. Without this call pytest-bdd
 # collects nothing — .feature files are not auto-discovered.
@@ -66,10 +68,17 @@ AUTO_N = NUMBERS_N + STRESS_N  # 5
 AUTO_SUM = 2.0 + 1.0  # 3.0
 AUTO_MEAN = AUTO_SUM / AUTO_N  # 0.6
 
-# The overridden reflections (US-19's rows, hand-written until it ships). Fractional
-# on purpose: a rubric score is not a right/wrong 1.0-or-0.0, and a mean that only
-# ever saw MCQ scores would never have to represent one.
+# What the admin overrides the AI's scores *to* (US-19 / FR-E5). Fractional on
+# purpose: a rubric score is not a right/wrong 1.0-or-0.0, and a mean that only ever
+# saw MCQ scores would never have to represent one. Neither value is one the stub
+# scorer produces for these essays, so a report showing the AI's number instead of
+# the human's could not land on the totals below.
 HUMAN_SCORES = [0.5, 1.0]
+
+REFLECTION_TEXT = (
+    "I have been going to bed by eleven and keeping my phone across the room. "
+    "I fall asleep faster and I am less irritable in my morning class."
+)
 SLEEP_MEAN = 0.75
 SLEEP_N = 2
 
@@ -186,6 +195,9 @@ def seeded(client, context):
     context["numbers_item"] = _add_mcq(client, challenge["id"], task_ids[0], NUMBERS)
     context["stress_item"] = _add_mcq(client, challenge["id"], task_ids[1], STRESS)
     context["sleep_item"] = _add_reflection(client, challenge["id"], task_ids[2], SLEEP)
+    # The admin override route is nested under challenge/task/item, which is what
+    # gives it campus isolation for free — so the scenario needs the task id too.
+    context["sleep_task"] = task_ids[2]
 
     resp = client.post(f"/api/challenges/{challenge['id']}/publish")
     assert resp.status_code == 200, resp.text
@@ -196,9 +208,50 @@ def quiz_responses_scored_against_tags(client, context):
     _submit_the_mcq_answers(client, context)
 
 
+def _write_reflection(client, item_id: int, subject: str) -> None:
+    """Submit a reflection as the student, then restore the admin session.
+
+    Enrolling first because the reflection route requires a current student, exactly
+    as US-19's own `scored` fixture does. Lands AI-scored (scored_by="auto") — the
+    override below is what makes it human.
+    """
+    _sign_in_as(client, "student", subject)
+    client.post("/enrollment")
+    resp = client.post(
+        f"/api/assessments/items/{item_id}/reflections", json={"text": REFLECTION_TEXT}
+    )
+    assert resp.status_code == 201, resp.text
+    _sign_in_as(client, "staff", ADMIN)
+
+
+def _override_scores(client, context, scores: list[float]) -> None:
+    """Re-score the reflections by hand, as an admin on the dashboard would (US-19).
+
+    Reads the responses back off the admin route rather than assuming ids: the
+    override is addressed by response id, and that list is where an admin gets one.
+    """
+    responses_url = (
+        f"/api/challenges/{context['challenge_id']}/tasks/{context['sleep_task']}"
+        f"/items/{context['sleep_item']}/responses"
+    )
+    listed = client.get(responses_url)
+    assert listed.status_code == 200, listed.text
+    rows = listed.json()
+    assert len(rows) == len(scores), f"expected {len(scores)} reflections, got {rows}"
+
+    # Ordered by subject so a score belongs to a student rather than to whatever
+    # order the route happened to return.
+    for row, score in zip(sorted(rows, key=lambda r: r["student_subject"]), scores):
+        # Auto until a human touches it — the precondition the override acts on.
+        assert row["scored_by"] == "auto", row
+        patched = client.patch(f"{responses_url}/{row['id']}", json={"score": score})
+        assert patched.status_code == 200, patched.text
+        assert patched.json()["scored_by"] == "human"
+
+
 @given('some reflections were overridden with scored_by "human"')
-def reflections_overridden_by_a_human(client, db_sessionmaker, context):
-    """Direct-insert the rows US-19 will one day write. See the module docstring.
+def reflections_overridden_by_a_human(client, context):
+    """AI-scored through the real route, then overridden through the real route.
 
     The MCQ answers go in too, and "some" is why: an aggregate made only of
     overridden scores could not show that they were *included* in anything — every
@@ -206,20 +259,9 @@ def reflections_overridden_by_a_human(client, db_sessionmaker, context):
     overridden scores are reflected in the totals" becomes a claim that can fail.
     """
     _submit_the_mcq_answers(client, context)
-
-    with db_sessionmaker() as db:
-        for subject, score in zip(STUDENTS, HUMAN_SCORES):
-            student = db.query(Student).filter_by(sso_subject=subject).one()
-            db.add(
-                AssessmentResponse(
-                    student_id=student.id,
-                    assessment_item_id=context["sleep_item"],
-                    response="I have been going to bed earlier and it helped.",
-                    score=score,
-                    scored_by="human",
-                )
-            )
-        db.commit()
+    for subject in STUDENTS[: len(HUMAN_SCORES)]:
+        _write_reflection(client, context["sleep_item"], subject)
+    _override_scores(client, context, HUMAN_SCORES)
 
 
 @when("I open the learning-outcome report")

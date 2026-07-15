@@ -3,9 +3,9 @@
 The two Gherkin scenarios themselves are executed by test_learning_outcome_report_bdd.py
 against tests/features/learning_outcome_report.feature. This module covers what the
 scenarios leave implicit: which challenge a report answers for and who may ask for one,
-the tag whose items nobody has answered, the weighting the total mean uses, the
-structural zero the human bucket reports until US-19, the shapes an empty challenge
-takes, and campus isolation.
+the tag whose items nobody has answered, the weighting the total mean uses, how an
+overridden score is counted (US-19 / FR-E5), the shapes an empty challenge takes, and
+campus isolation.
 
 Mirrors the pattern in test_engagement_report.py rather than importing from it — each
 report's helpers stay readable next to the report they exercise.
@@ -115,7 +115,13 @@ def _mint_student(client, subject: str) -> None:
 
 
 def _override(db_sessionmaker, item_id: int, subject: str, score: float) -> None:
-    """Hand-write a scored_by="human" row — US-19's write path, until it exists."""
+    """Write a scored_by="human" row directly.
+
+    US-19's real routes are driven by the Gherkin binder, which is where the
+    integration belongs. These edge cases only need a human-scored row to *exist* —
+    going through submit-then-PATCH for each would add a reflection scorer and two
+    round trips to tests about counting, and would obscure what each one is pinning.
+    """
     with db_sessionmaker() as db:
         student = db.query(Student).filter_by(sso_subject=subject).one()
         db.add(
@@ -333,12 +339,13 @@ class TestUnansweredTags:
 
 
 class TestHumanScored:
-    def test_the_human_bucket_is_a_structural_zero_today(self, client):
-        """Reported, not omitted — the zero says the US-19 override path is not wired.
+    def test_an_untouched_cohort_reports_zero_hand_scored(self, client):
+        """Reported, not omitted: "nobody has overridden anything" is an answer.
 
-        Same claim AttendanceReportOut makes with `staff: 0`. Every response the app
-        can currently write is auto-scored, and an admin should be able to read that
-        off the report rather than infer it from a missing field.
+        Not a structural zero — US-19 has shipped and the next test moves this
+        number. It is the honest zero of a cohort whose scores are all still the
+        ones students earned, which an admin should be able to read off the report
+        rather than infer from a missing field.
         """
         _, _, items = _setup(client)
         for subject in STUDENTS:

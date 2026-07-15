@@ -78,8 +78,9 @@ export interface EngagementReport {
  * `response_count` is 0. A tagged item nobody has answered has no mean, and 0
  * would paint a 0% bar that reads as a catastrophe rather than a blank.
  *
- * `human_scored_count` is a structural 0 until the reflection override ships
- * (US-19), the same shape as the engagement report's `guide_sessions`.
+ * `human_scored_count` is how many of the responses an admin re-scored by hand
+ * (US-19 / FR-E5). Counted, never filtered: an overridden score is a score, and
+ * it is in `mean_score` like any other.
  */
 export interface OutcomeScore {
   outcome_tag: string;

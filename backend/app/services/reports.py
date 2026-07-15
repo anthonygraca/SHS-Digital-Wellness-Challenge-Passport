@@ -234,9 +234,9 @@ def learning_outcome_report(
             AssessmentItem.outcome_tag,
             func.count(AssessmentResponse.id).label("response_count"),
             func.avg(AssessmentResponse.score).label("mean_score"),
-            func.sum(
-                case((AssessmentResponse.scored_by == "human", 1), else_=0)
-            ).label("human_scored_count"),
+            func.sum(case((AssessmentResponse.scored_by == "human", 1), else_=0)).label(
+                "human_scored_count"
+            ),
         )
         .select_from(AssessmentItem)
         .join(Task, Task.id == AssessmentItem.task_id)

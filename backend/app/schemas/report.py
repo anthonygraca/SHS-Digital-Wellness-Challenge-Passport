@@ -175,12 +175,14 @@ class OutcomeScoreOut(BaseModel):
     A tag answered by two students and one answered by two hundred otherwise
     render identically, and an admin acting on an 84% owes the difference.
 
-    ``human_scored_count`` is a structural 0 today — US-19's reflection override
-    is what writes scored_by="human" and it has not shipped. Reported rather than
-    omitted for the reason AttendanceReportOut reports ``staff: 0``: the zero says
-    the override path FR-F4 anticipates is not yet wired, and it makes "human
-    scores are included in the totals" readable off the report instead of a
-    promise the reader has to take on faith.
+    ``human_scored_count`` is how many of those responses an admin re-scored by
+    hand (US-19 / FR-E5, ``PATCH .../responses/{id}``, which sets
+    scored_by="human"). Counted but never filtered: an overridden score is a
+    score, and including it is the whole of US-24's second scenario. The count
+    exists so that "human scores are included in the totals" is readable off the
+    report rather than a promise the reader has to take on faith — and unlike
+    ``staff: 0`` or ``guide_sessions``, this one is not a structural zero. US-19
+    has shipped, so it moves as soon as an admin touches a score.
     """
 
     outcome_tag: str

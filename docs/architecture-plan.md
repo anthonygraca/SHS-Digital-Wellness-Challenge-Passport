@@ -418,14 +418,22 @@ total mean is `avg()` over every row, not the average of the per-tag means, whic
 three responses outvote one with three hundred. Both totals are counted across every response rather
 than folded up from the buckets, exactly as `total_checkins` is.
 
-**`human_scored_count` is a structural 0 until US-19** — the same shape as `guide_sessions` above, and
-for the same reason. Nothing writes `scored_by="human"`; the reflection override is US-19 / FR-E5.
-`scored_by` is counted but never filtered, which is the whole of US-24's second Gherkin scenario, and
-the count exists so that "overridden scores are included in the totals" is readable off the report
-rather than taken on faith. The scenario is exercised by direct-inserted rows, as US-23's guide
-sessions are, so US-19 only has to write one. The card stays silent while the count is 0 rather than
-drawing a permanently-empty provenance badge: unlike the guide's zero, there is nothing an admin could
-do about this one, and it is a fact about the API rather than about the cohort.
+**`human_scored_count` is not a structural zero, and US-24 was built believing it would be.** Worth
+recording because the branch outlived its own assumption. US-19 was unmerged while this was written,
+so `scored_by="human"` had no writer, and the plan was the `guide_sessions` move: report the zero,
+exercise it with direct-inserted rows, let the story that writes one arrive later. US-19 landed first.
+The count now moves the moment an admin uses `PATCH .../responses/{id}`, and two things changed with
+it. The Gherkin binder drives the real routes — AI-scored through `POST /items/{id}/reflections`, then
+overridden through the admin PATCH — because the house rule is that direct inserts are reserved for
+rows no route can write, and the exception ends when a route exists. The scenario got stronger for it:
+the reflections are scored twice, so the aggregate has to reflect the human value rather than the one
+the essay originally earned, which no hand-written row could have shown. And the card names the
+hand-scored count once it is non-zero, having planned to stay silent forever. `scored_by` is counted
+but never filtered — an overridden score is a score, which is the whole of the second scenario.
+
+The general lesson, for the next story that reserves a field for one that has not landed: a structural
+zero is a claim with an expiry date, and the code that asserts it should be read again the day the
+other story merges. Ours asserted it in five docstrings and a test name.
 
 **Theme is data, not code (R6 / NFR-6).** `Theme.id` is a slug that doubles as the SPA's
 `data-theme` value, so a theme's static token block still skins the app if its row is missing.

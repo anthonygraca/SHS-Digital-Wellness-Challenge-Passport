@@ -991,9 +991,11 @@ describe("Learning-outcome report (US-24 / FR-F4)", () => {
     expect(outcomeRows().map((li) => li.textContent)).toEqual(["Sexual health79%"]);
   });
 
-  it("shows human-overridden scores without singling them out", async () => {
+  it("includes human-overridden scores in the mean and says how many", async () => {
     api.getLearningOutcomeReport.mockResolvedValue(
       asOutcomes({
+        total_responses: 120,
+        mean_score: 0.84,
         total_human_scored: 40,
         outcomes: [
           {
@@ -1009,10 +1011,24 @@ describe("Learning-outcome report (US-24 / FR-F4)", () => {
     render(<Reports />);
     await screen.findByRole("list", { name: /mean score by learning outcome/i });
 
-    // US-24 scenario 2 at the surface: the overridden scores are in the mean and
-    // the count, which is what "included in the totals" means. The card draws no
-    // provenance badge — that is US-19's to add if it earns one.
+    // US-24 scenario 2 at the surface: the overridden scores are inside the 84% and
+    // the 120, not filtered out of them — that is what "included in the totals"
+    // means. The count is named because a mean an admin partly set by hand reads
+    // differently from one the cohort earned, and 40 of 120 is that context.
     expect(outcomeRows().map((li) => li.textContent)).toEqual(["Know your numbers84%"]);
+    expect(
+      screen.getByText(/120 responses · 84% average · 40 hand-scored/i),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about hand-scoring when nobody has overridden anything", async () => {
+    render(<Reports />);
+
+    // The default fixture's total_human_scored is 0. An admin who has never used
+    // US-19's override is owed no vocabulary for it, and "0 hand-scored" would be a
+    // permanent line that never earns its space.
+    expect(await screen.findByText(/200 responses · 82% average/i)).toBeInTheDocument();
+    expect(screen.queryByText(/hand-scored/i)).toBeNull();
   });
 
   it("refreshing picks up newly scored responses", async () => {
