@@ -20,6 +20,7 @@ import type {
 } from "../../types/passport";
 import { useTheme } from "../../theme/ThemeProvider";
 import { resolveThemeCopy } from "../../theme/themes";
+import CrisisResources from "../CrisisResources/CrisisResources";
 import { BoltIcon, CheckCircleIcon, LockIcon, TrophyIcon } from "../icons";
 import { KnowledgeCheck } from "./KnowledgeCheck";
 import { QrScanner } from "./QrScanner";
@@ -563,7 +564,15 @@ export function Passport({
           No active challenge yet — check back soon.
         </div>
       )}
+      {/*
+        Outside every conditional above, so the crisis affordance is on screen in each
+        state this route can be in — loaded, loading, offline with nothing cached, and
+        "no active challenge yet". A student in crisis at a campus that has published
+        nothing is exactly the student the last branch strands, and FR-E3 does not depend
+        on a challenge existing any more than the API route does.
+      */}
       <div className={styles.signoutBar}>
+        <CrisisResources />
         <button
           type="button"
           className={styles.signout}

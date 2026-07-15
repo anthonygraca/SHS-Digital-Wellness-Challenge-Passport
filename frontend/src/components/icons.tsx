@@ -123,3 +123,35 @@ export function TrophyIcon({ size = 20 }: { size?: number }) {
     </svg>
   );
 }
+
+/** The prototype's "emergency" glyph — the crisis card's header mark (FR-E3). */
+export function EmergencyIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M10 2h4v5.13l4.44-2.56 2 3.46L15.99 10.6l4.45 2.57-2 3.46L14 14.07V19h-4v-4.93l-4.44 2.56-2-3.46 4.45-2.57L3.56 8.03l2-3.46L10 7.13V2z" />
+    </svg>
+  );
+}
+
+/** The prototype's "call" glyph — every crisis resource is a tel: link. */
+export function PhoneIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.02-.24c1.12.37 2.33.57 3.57.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02l-2.2 2.2z" />
+    </svg>
+  );
+}
