@@ -17,6 +17,7 @@ WeekStatus = Literal["locked", "available", "complete"]
 @dataclass
 class WeekView:
     week_no: int
+    task_id: int  # Added for US-15: task ID for check-in endpoint
     title: str
     caption: str
     activity_type: str
@@ -87,6 +88,7 @@ def build_passport(
         weeks.append(
             WeekView(
                 week_no=task.position,
+                task_id=task.id,
                 title=task.title,
                 caption=task.caption,
                 activity_type=task.activity_type,

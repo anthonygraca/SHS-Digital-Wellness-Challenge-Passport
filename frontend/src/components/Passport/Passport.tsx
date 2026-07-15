@@ -7,7 +7,7 @@ import { checkIn as checkInApi } from "../../api/checkins";
 import type { Passport as PassportData, WeekStatus } from "../../types/passport";
 import type { CheckInResponse } from "../../types/checkin";
 import { TipNotification } from "../TipNotification/TipNotification";
-import { BoltIcon, CheckCircleIcon, LockIcon } from "../icons";
+import { BoltIcon, CheckCircleIcon, LockIcon, TrophyIcon } from "../icons";
 import styles from "./Passport.module.css";
 
 const STATUS_LABEL: Record<WeekStatus, string> = {

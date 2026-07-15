@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from enum import Enum
 
 from sqlalchemy import (
     Boolean,
@@ -19,6 +20,14 @@ from app.db import Base
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class CheckInMethod(str, Enum):
+    """Method used for check-in (US-8, US-15)."""
+
+    EVENT_QR = "event_qr"
+    STAFF = "staff"
+    MANUAL = "manual"
 
 
 class Challenge(Base):
@@ -77,6 +86,7 @@ class Challenge(Base):
     )
 
 
+
 class Task(Base):
     """An ordered weekly task within a challenge (FR-B2).
 
@@ -112,6 +122,12 @@ class Task(Base):
     challenge: Mapped["Challenge"] = relationship("Challenge", back_populates="tasks")
     checkins: Mapped[list["CheckIn"]] = relationship(
         "CheckIn",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    assessment_items: Mapped[list["AssessmentItem"]] = relationship(
+        "AssessmentItem",
         back_populates="task",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -174,3 +190,42 @@ class CheckIn(Base):
     )
 
     task: Mapped["Task"] = relationship("Task", back_populates="checkins")
+
+
+class AssessmentItem(Base):
+    """An assessment item attached to a task (FR-B3).
+
+    Supports two item types:
+    - ``mcq``       — multiple-choice question with an answer key
+    - ``reflection`` — open-ended prompt with a grading rubric
+
+    Each item is tagged to a learning outcome (``outcome_tag``) for later
+    aggregate reporting.
+    """
+
+    __tablename__ = "assessment_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # "mcq" | "reflection"
+    item_type: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    # Shared fields
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    outcome_tag: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # MCQ fields (null for reflection)
+    mcq_options: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mcq_answer_key: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    # Reflection fields (null for mcq)
+    reflection_rubric: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    task: Mapped["Task"] = relationship("Task", back_populates="assessment_items")

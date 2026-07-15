@@ -98,11 +98,17 @@ def check_in_to_task(
 
     # 3. Validate the task is within the date window (FR-D1)
     now = datetime.now(timezone.utc)
-    if now < task.date_start or now > task.date_end:
-        raise HTTPException(
-            status_code=400,
-            detail=f"This task is only available from {task.date_start} to {task.date_end}",
-        )
+    if task.date_window_start and task.date_window_end:
+        # Convert dates to datetime for comparison
+        from datetime import time
+        start_dt = datetime.combine(task.date_window_start, time.min, tzinfo=timezone.utc)
+        end_dt = datetime.combine(task.date_window_end, time.max, tzinfo=timezone.utc)
+        
+        if now < start_dt or now > end_dt:
+            raise HTTPException(
+                status_code=400,
+                detail=f"This task is only available from {task.date_window_start} to {task.date_window_end}",
+            )
 
     # 4. Check if already checked in (idempotent)
     existing_checkin = (

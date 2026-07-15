@@ -21,6 +21,7 @@ def _to_passport_out(view: PassportView) -> PassportOut:
         weeks=[
             WeekOut(
                 weekNo=w.week_no,
+                taskId=w.task_id,
                 title=w.title,
                 caption=w.caption,
                 activityType=w.activity_type,
