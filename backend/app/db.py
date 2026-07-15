@@ -21,10 +21,18 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 
 def init_db() -> None:
-    """Create tables. Imports models so they are registered on Base.metadata."""
-    from app.models import student  # noqa: F401
+    """Create tables, then seed demo data. Imports models so they register on Base."""
+    from app.models import (
+        challenge,  # noqa: F401
+        student,  # noqa: F401
+    )
 
     Base.metadata.create_all(bind=engine)
+
+    from app.services.seed import seed_demo_challenge
+
+    with SessionLocal() as db:
+        seed_demo_challenge(db)
 
 
 def get_db() -> Iterator[Session]:

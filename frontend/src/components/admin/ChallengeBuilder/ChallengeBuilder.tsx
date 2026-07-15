@@ -1,0 +1,682 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSession } from "../../../auth/SessionProvider";
+import * as api from "../../../api/challenges";
+import type { Challenge, ChallengeSummary, Task } from "../../../types/challenge";
+import styles from "./ChallengeBuilder.module.css";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type View = { kind: "list" } | { kind: "detail"; id: number };
+
+// ---------------------------------------------------------------------------
+// Tiny helpers
+// ---------------------------------------------------------------------------
+
+function StatusBadge({ status }: { status: string }) {
+  const cls = status === "published" ? styles.statusPublished : styles.statusDraft;
+  return <span className={`${styles.statusBadge} ${cls}`}>{status}</span>;
+}
+
+function fmtDate(d: string | null | undefined) {
+  if (!d) return "—";
+  const [y, m, day] = d.split("-");
+  return `${m}/${day}/${y}`;
+}
+
+// ---------------------------------------------------------------------------
+// Challenge list view
+// ---------------------------------------------------------------------------
+
+function ChallengeList({
+  onOpen,
+  onCreated,
+}: {
+  onOpen: (id: number) => void;
+  onCreated: (id: number) => void;
+}) {
+  const [challenges, setChallenges] = useState<ChallengeSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setChallenges(await api.listChallenges());
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  return (
+    <>
+      <div className={styles.listHeader}>
+        <h2>Challenges</h2>
+        <button
+          type="button"
+          className={styles.btnPrimary}
+          onClick={() => setShowForm(true)}
+        >
+          + New challenge
+        </button>
+      </div>
+
+      {loading && <p className={styles.empty}>Loading…</p>}
+
+      {!loading && challenges.length === 0 && (
+        <p className={styles.empty}>No challenges yet — create the first one.</p>
+      )}
+
+      {challenges.map((c) => (
+        <div
+          key={c.id}
+          role="button"
+          tabIndex={0}
+          className={styles.challengeCard}
+          onClick={() => onOpen(c.id)}
+          onKeyDown={(e) => e.key === "Enter" && onOpen(c.id)}
+          aria-label={`Open ${c.name}`}
+        >
+          <div className={styles.challengeCardInfo}>
+            <h3>{c.name}</h3>
+            <p>
+              {c.semester} · {fmtDate(c.start_date)} – {fmtDate(c.end_date)}
+            </p>
+          </div>
+          <StatusBadge status={c.status} />
+        </div>
+      ))}
+
+      {showForm && (
+        <ChallengeFormModal
+          onClose={() => setShowForm(false)}
+          onSaved={(c) => { setShowForm(false); onCreated(c.id); }}
+        />
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Challenge detail view
+// ---------------------------------------------------------------------------
+
+function ChallengeDetail({
+  id,
+  onBack,
+}: {
+  id: number;
+  onBack: () => void;
+}) {
+  const [challenge, setChallenge] = useState<Challenge | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editChallenge, setEditChallenge] = useState(false);
+  const [addingTask, setAddingTask] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setChallenge(await api.getChallenge(id));
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function handlePublish() {
+    if (!challenge) return;
+    setPublishing(true);
+    setError(null);
+    try {
+      const updated = await api.publishChallenge(challenge.id);
+      setChallenge(updated);
+    } catch (e) {
+      setError(e instanceof api.ApiError ? e.message : "Publish failed");
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  async function handleDeleteTask(taskId: number) {
+    if (!challenge) return;
+    await api.deleteTask(challenge.id, taskId);
+    await load();
+  }
+
+  async function handleReorder(newOrder: number[]) {
+    if (!challenge) return;
+    const updated = await api.reorderTasks(challenge.id, { task_ids: newOrder });
+    setChallenge((prev) => prev ? { ...prev, tasks: updated } : prev);
+  }
+
+  if (loading) return <p className={styles.empty}>Loading…</p>;
+  if (!challenge) return <p className={styles.empty}>Challenge not found.</p>;
+
+  return (
+    <>
+      <div className={styles.detailHeader}>
+        <button type="button" className={styles.backBtn} onClick={onBack}>
+          ← All challenges
+        </button>
+        <div className={styles.detailMeta}>
+          <h2>{challenge.name}</h2>
+          <div className={styles.metaRow}>
+            <span>{challenge.semester}</span>
+            <span>{fmtDate(challenge.start_date)} – {fmtDate(challenge.end_date)}</span>
+            <StatusBadge status={challenge.status} />
+          </div>
+          {error && <p className={styles.error}>{error}</p>}
+          <div className={styles.detailActions}>
+            <button
+              type="button"
+              className={styles.btnSecondary}
+              onClick={() => setEditChallenge(true)}
+            >
+              Edit details
+            </button>
+            {challenge.status === "draft" && (
+              <button
+                type="button"
+                className={styles.btnPrimary}
+                onClick={() => void handlePublish()}
+                disabled={publishing}
+              >
+                {publishing ? "Publishing…" : "Publish"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.taskSection}>
+        <h3>Weekly tasks ({challenge.tasks.length})</h3>
+
+        <TaskList
+          tasks={challenge.tasks}
+          onEdit={setEditingTask}
+          onDelete={(taskId) => void handleDeleteTask(taskId)}
+          onReorder={handleReorder}
+        />
+
+        <button
+          type="button"
+          className={styles.btnSecondary}
+          style={{ marginTop: 12 }}
+          onClick={() => setAddingTask(true)}
+        >
+          + Add task
+        </button>
+      </div>
+
+      {editChallenge && (
+        <ChallengeFormModal
+          existing={challenge}
+          onClose={() => setEditChallenge(false)}
+          onSaved={(c) => { setEditChallenge(false); setChallenge(c); }}
+        />
+      )}
+
+      {addingTask && (
+        <TaskFormModal
+          challengeId={challenge.id}
+          onClose={() => setAddingTask(false)}
+          onSaved={() => { setAddingTask(false); void load(); }}
+        />
+      )}
+
+      {editingTask && (
+        <TaskFormModal
+          challengeId={challenge.id}
+          existing={editingTask}
+          onClose={() => setEditingTask(null)}
+          onSaved={() => { setEditingTask(null); void load(); }}
+        />
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Task list with HTML5 drag-to-reorder
+// ---------------------------------------------------------------------------
+
+function TaskList({
+  tasks,
+  onEdit,
+  onDelete,
+  onReorder,
+}: {
+  tasks: Task[];
+  onEdit: (t: Task) => void;
+  onDelete: (id: number) => void;
+  onReorder: (ids: number[]) => Promise<void>;
+}) {
+  const dragSrc = useRef<number | null>(null); // index being dragged
+  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
+
+  // Local optimistic order so the list snaps immediately before the server round-trip.
+  const [localOrder, setLocalOrder] = useState<Task[]>(tasks);
+  // Sync when parent refreshes
+  useEffect(() => setLocalOrder(tasks), [tasks]);
+
+  function handleDragStart(idx: number) {
+    dragSrc.current = idx;
+    setDraggingIdx(idx);
+  }
+
+  function handleDragEnter(idx: number) {
+    if (dragSrc.current === null || dragSrc.current === idx) return;
+    setOverIdx(idx);
+  }
+
+  function handleDragEnd() {
+    const src = dragSrc.current;
+    const dst = overIdx;
+    dragSrc.current = null;
+    setDraggingIdx(null);
+    setOverIdx(null);
+    if (src === null || dst === null || src === dst) return;
+
+    const next = [...localOrder];
+    const [moved] = next.splice(src, 1);
+    next.splice(dst, 0, moved);
+    setLocalOrder(next);
+    void onReorder(next.map((t) => t.id));
+  }
+
+  if (localOrder.length === 0) {
+    return (
+      <p className={styles.empty} style={{ padding: "16px 0" }}>
+        No tasks yet.
+      </p>
+    );
+  }
+
+  return (
+    <ul className={styles.taskList} aria-label="Weekly tasks">
+      {localOrder.map((task, idx) => (
+        <li
+          key={task.id}
+          className={styles.taskItem}
+          draggable
+          data-dragging={draggingIdx === idx ? "true" : undefined}
+          data-over={overIdx === idx ? "true" : undefined}
+          onDragStart={() => handleDragStart(idx)}
+          onDragEnter={() => handleDragEnter(idx)}
+          onDragOver={(e) => e.preventDefault()}
+          onDragEnd={handleDragEnd}
+          aria-label={`Week ${task.position}: ${task.title}`}
+        >
+          <div className={styles.dragHandle} aria-hidden="true">
+            <span /><span /><span />
+          </div>
+
+          <div className={styles.taskBody}>
+            <p className={styles.taskTitle}>
+              {task.position}. {task.title}
+              {task.required && (
+                <span className={styles.reqBadge} style={{ marginLeft: 8 }}>
+                  Required
+                </span>
+              )}
+            </p>
+            <div className={styles.taskMeta}>
+              {task.activity_type && <span>{task.activity_type}</span>}
+              {task.location && <span>📍 {task.location}</span>}
+              {(task.date_window_start || task.date_window_end) && (
+                <span>
+                  {fmtDate(task.date_window_start)} – {fmtDate(task.date_window_end)}
+                </span>
+              )}
+              {task.prize && <span>🏆 {task.prize}</span>}
+            </div>
+            {task.caption && (
+              <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--wp-on-surface-variant)" }}>
+                {task.caption}
+              </p>
+            )}
+          </div>
+
+          <div className={styles.taskActions}>
+            <button
+              type="button"
+              className={styles.btnGhost}
+              onClick={() => onEdit(task)}
+              aria-label={`Edit ${task.title}`}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className={styles.btnDanger}
+              onClick={() => onDelete(task.id)}
+              aria-label={`Delete ${task.title}`}
+            >
+              Delete
+            </button>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Challenge create / edit modal
+// ---------------------------------------------------------------------------
+
+function ChallengeFormModal({
+  existing,
+  onClose,
+  onSaved,
+}: {
+  existing?: Challenge;
+  onClose: () => void;
+  onSaved: (c: Challenge) => void;
+}) {
+  const [name, setName] = useState(existing?.name ?? "");
+  const [semester, setSemester] = useState(existing?.semester ?? "");
+  const [startDate, setStartDate] = useState(existing?.start_date ?? "");
+  const [endDate, setEndDate] = useState(existing?.end_date ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSaving(true);
+    try {
+      let saved: Challenge;
+      if (existing) {
+        saved = await api.updateChallenge(existing.id, {
+          name, semester, start_date: startDate, end_date: endDate,
+        });
+      } else {
+        saved = await api.createChallenge({
+          name, semester, start_date: startDate, end_date: endDate,
+        });
+      }
+      onSaved(saved);
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Challenge form">
+      <div className={styles.modal}>
+        <h2>{existing ? "Edit challenge" : "New challenge"}</h2>
+        {error && <p className={styles.error}>{error}</p>}
+        <form onSubmit={(e) => void handleSubmit(e)}>
+          <div className={styles.fieldGroup}>
+            <label htmlFor="cf-name">Challenge name</label>
+            <input
+              id="cf-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              placeholder="e.g. Fall 2025 Wellness"
+            />
+          </div>
+          <div className={styles.fieldGroup}>
+            <label htmlFor="cf-semester">Semester</label>
+            <input
+              id="cf-semester"
+              type="text"
+              value={semester}
+              onChange={(e) => setSemester(e.target.value)}
+              required
+              placeholder="e.g. Fall 2025"
+            />
+          </div>
+          <div className={`${styles.fieldGroup} ${styles.fieldRow}`}>
+            <div>
+              <label htmlFor="cf-start">Start date</label>
+              <input
+                id="cf-start"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="cf-end">End date</label>
+              <input
+                id="cf-end"
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+          <div className={styles.formActions}>
+            <button type="button" className={styles.btnSecondary} onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className={styles.btnPrimary} disabled={saving}>
+              {saving ? "Saving…" : existing ? "Save changes" : "Create challenge"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Task create / edit modal
+// ---------------------------------------------------------------------------
+
+function TaskFormModal({
+  challengeId,
+  existing,
+  onClose,
+  onSaved,
+}: {
+  challengeId: number;
+  existing?: Task;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [title, setTitle] = useState(existing?.title ?? "");
+  const [caption, setCaption] = useState(existing?.caption ?? "");
+  const [activityType, setActivityType] = useState(existing?.activity_type ?? "");
+  const [location, setLocation] = useState(existing?.location ?? "");
+  const [windowStart, setWindowStart] = useState(existing?.date_window_start ?? "");
+  const [windowEnd, setWindowEnd] = useState(existing?.date_window_end ?? "");
+  const [prize, setPrize] = useState(existing?.prize ?? "");
+  const [required, setRequired] = useState(existing?.required ?? true);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSaving(true);
+    const payload = {
+      title,
+      caption,
+      activity_type: activityType,
+      location,
+      date_window_start: windowStart || null,
+      date_window_end: windowEnd || null,
+      prize,
+      required,
+    };
+    try {
+      if (existing) {
+        await api.updateTask(challengeId, existing.id, payload);
+      } else {
+        await api.addTask(challengeId, payload);
+      }
+      onSaved();
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Task form">
+      <div className={styles.modal}>
+        <h2>{existing ? "Edit task" : "Add task"}</h2>
+        {error && <p className={styles.error}>{error}</p>}
+        <form onSubmit={(e) => void handleSubmit(e)}>
+          <div className={styles.fieldGroup}>
+            <label htmlFor="tf-title">Title</label>
+            <input
+              id="tf-title"
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+              placeholder="e.g. Week 1 – Vision Check"
+            />
+          </div>
+          <div className={styles.fieldGroup}>
+            <label htmlFor="tf-caption">Caption</label>
+            <textarea
+              id="tf-caption"
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              placeholder="Short description shown to students"
+            />
+          </div>
+          <div className={`${styles.fieldGroup} ${styles.fieldRow}`}>
+            <div>
+              <label htmlFor="tf-type">Activity type</label>
+              <input
+                id="tf-type"
+                type="text"
+                value={activityType}
+                onChange={(e) => setActivityType(e.target.value)}
+                placeholder="e.g. health_screening"
+              />
+            </div>
+            <div>
+              <label htmlFor="tf-location">Location</label>
+              <input
+                id="tf-location"
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="e.g. SHS Lobby"
+              />
+            </div>
+          </div>
+          <div className={`${styles.fieldGroup} ${styles.fieldRow}`}>
+            <div>
+              <label htmlFor="tf-wstart">Window start</label>
+              <input
+                id="tf-wstart"
+                type="date"
+                value={windowStart}
+                onChange={(e) => setWindowStart(e.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="tf-wend">Window end</label>
+              <input
+                id="tf-wend"
+                type="date"
+                value={windowEnd}
+                onChange={(e) => setWindowEnd(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className={styles.fieldGroup}>
+            <label htmlFor="tf-prize">Prize</label>
+            <input
+              id="tf-prize"
+              type="text"
+              value={prize}
+              onChange={(e) => setPrize(e.target.value)}
+              placeholder="e.g. Raffle entry"
+            />
+          </div>
+          <div className={styles.fieldGroup}>
+            <div className={styles.checkRow}>
+              <input
+                id="tf-required"
+                type="checkbox"
+                checked={required}
+                onChange={(e) => setRequired(e.target.checked)}
+              />
+              <label htmlFor="tf-required" style={{ fontWeight: "normal" }}>
+                Required task (counts toward prize eligibility)
+              </label>
+            </div>
+          </div>
+          <div className={styles.formActions}>
+            <button type="button" className={styles.btnSecondary} onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className={styles.btnPrimary} disabled={saving}>
+              {saving ? "Saving…" : existing ? "Save changes" : "Add task"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Root component
+// ---------------------------------------------------------------------------
+
+export function ChallengeBuilder() {
+  const { session, signOut } = useSession();
+  const [view, setView] = useState<View>({ kind: "list" });
+
+  return (
+    <div className={styles.page}>
+      <header className={styles.topbar}>
+        <h1>Challenge Builder</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {session && (
+            <span style={{ fontSize: 13, color: "var(--wp-on-surface-variant)" }}>
+              {session.affiliation}
+            </span>
+          )}
+          <button
+            type="button"
+            className={styles.btnSecondary}
+            onClick={() => void signOut()}
+          >
+            Sign out
+          </button>
+        </div>
+      </header>
+
+      <main className={styles.content}>
+        {view.kind === "list" && (
+          <ChallengeList
+            onOpen={(id) => setView({ kind: "detail", id })}
+            onCreated={(id) => setView({ kind: "detail", id })}
+          />
+        )}
+        {view.kind === "detail" && (
+          <ChallengeDetail
+            id={view.id}
+            onBack={() => setView({ kind: "list" })}
+          />
+        )}
+      </main>
+    </div>
+  );
+}

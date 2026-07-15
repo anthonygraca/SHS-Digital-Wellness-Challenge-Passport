@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.db import init_db
-from app.routers import admin, auth, challenges, checkins, enrollment
+from app.routers import admin, auth, challenges, checkins, enrollment, passport
 
 
 @asynccontextmanager
@@ -19,6 +19,7 @@ app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(enrollment.router)
 app.include_router(challenges.router)
+app.include_router(passport.router)
 app.include_router(checkins.router)
 
 

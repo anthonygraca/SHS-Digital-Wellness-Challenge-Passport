@@ -1,15 +1,10 @@
-"""Challenge, Task, Enrollment, and CheckIn models (FR-B1, FR-B2, FR-D1, FR-D4, FR-E1).
-
-A Challenge contains ordered weekly Tasks. Students enroll in Challenges and
-check in to Tasks. Check-ins trigger personalized tips (US-15).
-"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -26,101 +21,105 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class ChallengeStatus(str, Enum):
-    """Challenge lifecycle status."""
-
-    DRAFT = "draft"
-    ACTIVE = "active"
-    COMPLETED = "completed"
-    ARCHIVED = "archived"
-
-
-class ActivityType(str, Enum):
-    """Task activity types."""
-
-    WORKSHOP = "workshop"
-    SCREENING = "screening"
-    LAB = "lab"
-    SEMINAR = "seminar"
-    EVENT = "event"
-
-
-class CheckInMethod(str, Enum):
-    """How a check-in was captured (FR-D4)."""
-
-    EVENT_QR = "event_qr"  # Student scanned event QR
-    STAFF = "staff"  # Staff scanned student's passport QR
-    MANUAL = "manual"  # Admin manual override
-
-
 class Challenge(Base):
-    """A themed wellness challenge with ordered weekly tasks (FR-B1, FR-B2).
+    """An admin-authored challenge for a given semester (FR-B1).
 
-    Challenges are data/config, never code. Each challenge belongs to a campus
-    and has a specific semester/date range.
+    Starts in "draft" status; transitions to "published" when the admin
+    explicitly publishes. Campus isolation is enforced by campus_id on every
+    row — no campus can touch another's challenges.
+
+    Only a "published" challenge is visible to students in their passport (US-5);
+    "draft" is admin-only, still being authored.
     """
 
     __tablename__ = "challenges"
+    __table_args__ = (
+        UniqueConstraint(
+            "campus_id",
+            "name",
+            "semester",
+            name="uq_challenge_campus_name_sem",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     campus_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     semester: Mapped[str] = mapped_column(String(64), nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=ChallengeStatus.DRAFT.value, index=True
-    )
-    theme_name: Mapped[str] = mapped_column(String(100), nullable=True)
-    starts_on: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    ends_on: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    # Drives the passport's visual theme (US-5). Empty string = default theme.
+    theme_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+
+    # "draft" | "published"
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
 
-    # Relationships
     tasks: Mapped[list["Task"]] = relationship(
-        "Task", back_populates="challenge", cascade="all, delete-orphan"
+        "Task",
+        back_populates="challenge",
+        order_by="Task.position",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     enrollments: Mapped[list["Enrollment"]] = relationship(
-        "Enrollment", back_populates="challenge", cascade="all, delete-orphan"
+        "Enrollment",
+        back_populates="challenge",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
 class Task(Base):
-    """A weekly task within a challenge (FR-B2).
+    """An ordered weekly task within a challenge (FR-B2).
 
-    Each task has a title, caption, activity type, location, date window,
-    prize description, and a required flag for prize eligibility.
+    `position` is the 1-based display order. Reordering is done by updating
+    positions in a single service call so the order stays gapless. The passport
+    (US-5) surfaces `position` as the week number and derives status from it by
+    sequential unlock.
     """
 
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     challenge_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("challenges.id"), nullable=False, index=True
+        ForeignKey("challenges.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    week_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    caption: Mapped[str] = mapped_column(Text, nullable=True)
-    activity_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    location: Mapped[str] = mapped_column(String(255), nullable=True)
-    date_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    date_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    prize: Mapped[str] = mapped_column(String(255), nullable=True)
-    is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    order: Mapped[int] = mapped_column(Integer, nullable=False)
+    caption: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    activity_type: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    location: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    date_window_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    date_window_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    prize: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     # SHS-approved content reference for grounding AI tips (US-15, FR-E1)
-    content_tags: Mapped[str] = mapped_column(String(255), nullable=True)
+    content_tags: Mapped[str] = mapped_column(String(255), nullable=False, default="")
 
-    # Relationships
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
     challenge: Mapped["Challenge"] = relationship("Challenge", back_populates="tasks")
     checkins: Mapped[list["CheckIn"]] = relationship(
-        "CheckIn", back_populates="task", cascade="all, delete-orphan"
+        "CheckIn",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
 class Enrollment(Base):
-    """Student enrollment in a challenge (FR-C1).
+    """Student enrollment in a challenge (FR-C1, US-15).
 
     Students must enroll before checking in. One enrollment per student per challenge.
     """
@@ -132,21 +131,20 @@ class Enrollment(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     student_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("students.id"), nullable=False, index=True
+        ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True
     )
     challenge_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("challenges.id"), nullable=False, index=True
+        ForeignKey("challenges.id", ondelete="CASCADE"), nullable=False, index=True
     )
     enrolled_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
 
-    # Relationships
     challenge: Mapped["Challenge"] = relationship("Challenge", back_populates="enrollments")
 
 
 class CheckIn(Base):
-    """A student's completion of a task (FR-D1, FR-D2, FR-D4, US-8).
+    """A student's completion of a task (FR-D1, FR-D2, FR-D4, US-8, US-15).
 
     Records who, what task, when, and how (event_qr / staff / manual).
     Triggers personalized tip generation (US-15).
@@ -159,11 +157,12 @@ class CheckIn(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     student_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("students.id"), nullable=False, index=True
+        ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True
     )
     task_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tasks.id"), nullable=False, index=True
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Method: "event_qr", "staff", or "manual"
     method: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     checked_in_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False, index=True
@@ -171,8 +170,7 @@ class CheckIn(Base):
 
     # For staff-verified check-ins (method=staff or manual)
     verified_by: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("students.id"), nullable=True
+        ForeignKey("students.id", ondelete="SET NULL"), nullable=True
     )
 
-    # Relationships
     task: Mapped["Task"] = relationship("Task", back_populates="checkins")
