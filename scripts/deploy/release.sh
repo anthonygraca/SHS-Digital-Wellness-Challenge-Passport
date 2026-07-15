@@ -15,7 +15,12 @@ git diff --quiet && git diff --cached --quiet || DIRTY="-dirty"
 TAG="${SHA}${DIRTY}"
 
 say "Building wellness-passport:${TAG}"
-docker build -t "wellness-passport:${TAG}" .
+# The same TAG is stamped into the image and used as its ECR tag, so what
+# /api/version reports and what the registry calls it cannot drift apart.
+docker build \
+  --build-arg "WP_GIT_SHA=${TAG}" \
+  --build-arg "WP_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -t "wellness-passport:${TAG}" .
 
 say "Pushing to ECR"
 ecr_login
@@ -55,4 +60,13 @@ wait_for_healthz "$host" 24 || die "deployed, but /healthz never answered. See s
 ctype="$(curl -s -o /dev/null -w '%{content_type}' --max-time 6 "http://${host}/")"
 [[ "$ctype" == text/html* ]] || die "/ returned '${ctype}', not HTML — the SPA mount is missing from app/main.py"
 
+# "The rollout succeeded" and "the new code is running" are different claims. The
+# SSM command exits 0 if compose ran, even when it recreated nothing: a pull that
+# silently kept a cached :latest, or a container that never restarted, both look
+# like success from here. Ask the app which commit it is instead of assuming.
+deployed="$(curl -s --max-time 6 "http://${host}/api/version" \
+  | sed -n 's/.*"gitSha":"\([^"]*\)".*/\1/p')"
+[[ "$deployed" == "$TAG" ]] || die "rolled out ${TAG}, but /api/version reports '${deployed:-<nothing>}' — the old container is probably still serving. Check: scripts/deploy/logs.sh"
+
 say "Released ${TAG}  ->  http://${host}/"
+info "/api/version confirms ${deployed} is serving"

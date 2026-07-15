@@ -13,6 +13,10 @@ if [[ "$state" == "running" ]]; then
   info "url:    http://${host}/"
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 "http://${host}/healthz" 2>/dev/null || echo "---")"
   info "health: ${code}"
+  # Which commit is actually serving — not which one you last pushed.
+  sha="$(curl -s --max-time 6 "http://${host}/api/version" 2>/dev/null \
+    | sed -n 's/.*"gitSha":"\([^"]*\)".*/\1/p')"
+  info "commit: ${sha:-unknown}"
 fi
 
 say "Who can reach it"

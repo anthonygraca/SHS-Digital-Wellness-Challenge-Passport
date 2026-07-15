@@ -66,8 +66,27 @@ rolls the instance onto it over SSM. The SHA tag is what makes a running deploym
 traceable back to a commit; `:latest` is what lets the host's compose file stay static.
 A dirty tree is tagged `-dirty` so you can tell a real release from a hack.
 
-`release.sh` refuses to declare success unless `/healthz` answers **and** `/` returns
-HTML — see "the SPA mount" below for why that second check exists.
+`release.sh` refuses to declare success unless three things hold: `/healthz` answers, `/`
+returns HTML (see "the SPA mount" below), and `/api/version` reports the SHA it just
+built. That last check exists because "the rollout succeeded" and "the new code is
+running" are different claims — the SSM command exits 0 if compose ran at all, so a pull
+that kept a cached `:latest` or a container that never recreated both look like success.
+
+## Which build is deployed?
+
+```bash
+curl -s http://<host>/api/version      # {"version":"0.1.0","gitSha":"a1b2c3d","builtAt":"..."}
+scripts/deploy/status.sh               # prints the same SHA under "commit:"
+```
+
+The same SHA is also stamped, quietly, at the bottom of the sign-in screen — so anyone
+looking at the app, including a stakeholder on a phone, can say which build they are
+looking at without your help.
+
+An **unstamped** build reports `"unknown"` and shows nothing on the sign-in screen. That
+is correct and expected: only `release.sh` passes the build args, so a plain
+`docker build .` or a local `uvicorn` has no SHA to claim. A `-dirty` suffix means the
+image was built from an uncommitted tree and matches no commit.
 
 ## How it fits together
 

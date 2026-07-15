@@ -51,6 +51,20 @@ VOLUME ["/data"]
 
 EXPOSE 8000
 
+# Build provenance, surfaced at GET /api/version and on the sign-in screen.
+# release.sh passes the same SHA it tags the image with, so the stamp and the tag
+# cannot disagree. Defaults to "unknown" so a plain `docker build` says so rather
+# than claiming a version it does not have.
+#
+# Last on purpose. These change on every single commit, and an ARG invalidates
+# every layer beneath it — declared any higher, they would re-run npm ci and pip
+# install on every release. Everything below here is metadata, so there is no
+# layer left to bust.
+ARG WP_GIT_SHA=unknown
+ARG WP_BUILT_AT=unknown
+ENV WP_GIT_SHA=${WP_GIT_SHA} \
+    WP_BUILT_AT=${WP_BUILT_AT}
+
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"
 

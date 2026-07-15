@@ -1,0 +1,13 @@
+/* Matches SignIn's .trace register: the quietest thing on the screen. It sits in
+   normal flow rather than fixed/absolute so it can never overlap the sign-in CTA
+   on a short phone viewport. */
+.stamp {
+  margin: 6px 0 0;
+  text-align: center;
+  font-family: var(--wp-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  color: var(--wp-on-surface-variant);
+  opacity: 0.55;
+  /* A SHA is unbreakable at any width; keep it from widening the sheet. */
+  overflow-wrap: anywhere;
+}

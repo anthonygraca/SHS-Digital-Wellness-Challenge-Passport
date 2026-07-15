@@ -1,6 +1,7 @@
 import { startLogin } from "../../auth/auth";
 import { useThemeCopy } from "../../theme/ThemeProvider";
 import { LockIcon, SchoolIcon } from "../icons";
+import { VersionStamp } from "../VersionStamp/VersionStamp";
 import styles from "./SignIn.module.css";
 
 /**
@@ -42,6 +43,10 @@ export function SignIn({ onSignIn = startLogin }: { onSignIn?: () => void }) {
         <p className={styles.trace}>
           UC-1 · FR-A1 / FR-A2 — opaque SSO subject only, no PHI
         </p>
+        {/* Which build is deployed (#64). Sign-in is the one screen everyone
+            lands on, and it is pre-auth, so it is reachable when diagnosing a
+            deployment nobody can get into. Renders nothing unless stamped. */}
+        <VersionStamp />
       </section>
     </main>
   );

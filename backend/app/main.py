@@ -9,6 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
+from app.config import get_settings
 from app.db import init_db
 from app.routers import (
     assessments,
@@ -32,6 +33,10 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 # /auth path is /auth/callback, which really is a client-side route.
 _API_ONLY_PREFIXES = ("api/", "enrollment", "mock-idp/", "healthz")
 
+# Mirrors backend/pyproject.toml. Coarse — it has not moved and will not move often
+# enough to identify a build, which is what git_sha is for.
+APP_VERSION = "0.1.0"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -39,7 +44,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="SHS Wellness Passport API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="SHS Wellness Passport API", version=APP_VERSION, lifespan=lifespan)
 app.include_router(auth.router)
 app.include_router(enrollment.router)
 app.include_router(challenges.router)
@@ -53,6 +58,31 @@ app.include_router(guide.router)
 @app.get("/healthz")
 def healthz():
     return {"status": "ok"}
+
+
+@app.get("/api/version")
+def version():
+    """What is actually running here.
+
+    Unauthenticated on purpose: it is the first thing you want when a deployment
+    is behaving oddly, and needing a session to ask is exactly the wrong time to
+    need one. It discloses nothing a reader of this public repo cannot already
+    see — the SHA it returns names a public commit.
+
+    The SPA reads this at runtime rather than having the value baked into the
+    bundle at build time. That is not a style choice: vite.config.ts registers a
+    Workbox service worker with registerType "autoUpdate", so the bundle a
+    browser is running may be several deploys stale. A baked-in stamp would
+    faithfully report the *cached bundle's* version while the server ran
+    something else, which is worse than no stamp at all — a version display that
+    can lie is a trap, not a feature.
+    """
+    settings = get_settings()
+    return {
+        "version": APP_VERSION,
+        "gitSha": settings.git_sha,
+        "builtAt": settings.built_at,
+    }
 
 
 class SpaStaticFiles(StaticFiles):
