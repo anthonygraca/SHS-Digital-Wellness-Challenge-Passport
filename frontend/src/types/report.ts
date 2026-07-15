@@ -67,3 +67,46 @@ export interface EngagementReport {
   content_views: ContentRefCount[];
   guide_sessions: number;
 }
+
+/**
+ * How one learning outcome scored across the cohort (FR-F4 / US-24).
+ *
+ * `outcome_tag` is a plain string, not a union like `ContentRef`: the vocabulary
+ * is admin-authored per challenge, so there is no set to close over.
+ *
+ * `mean_score` is a raw 0..1 and is `null` — never 0 — exactly when
+ * `response_count` is 0. A tagged item nobody has answered has no mean, and 0
+ * would paint a 0% bar that reads as a catastrophe rather than a blank.
+ *
+ * `human_scored_count` is how many of the responses an admin re-scored by hand
+ * (US-19 / FR-E5). Counted, never filtered: an overridden score is a score, and
+ * it is in `mean_score` like any other.
+ */
+export interface OutcomeScore {
+  outcome_tag: string;
+  mean_score: number | null;
+  response_count: number;
+  human_scored_count: number;
+}
+
+/**
+ * Mean assessment score per learning-outcome tag (FR-F4 / US-24) — the report
+ * that replaces hand-scoring.
+ *
+ * Tags arrive alphabetically, always. The other reports get their fixed order
+ * from a constant on the client and the server both; this one has an open
+ * vocabulary, so the order is the server's ORDER BY and nothing here re-sorts it.
+ *
+ * Raw scores only: rendering a mean as "84%" is this layer's job, which is why
+ * `mean_score` arrives as a fraction. `total_responses` is what the buckets
+ * reconcile against, and the total `mean_score` is weighted by response — not the
+ * mean of the per-tag means, which would let a tag with three responses outvote
+ * one with three hundred.
+ */
+export interface LearningOutcomeReport {
+  challenge: ReportChallenge;
+  total_responses: number;
+  mean_score: number | null;
+  total_human_scored: number;
+  outcomes: OutcomeScore[];
+}
