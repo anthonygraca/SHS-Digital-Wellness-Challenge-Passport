@@ -137,3 +137,55 @@ export interface AssessmentItemUpdate {
   answer_key?: string;
   rubric?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Manual completion override + audit (FR-D6 / US-27)
+// ---------------------------------------------------------------------------
+
+export type CheckInMethod = "event_qr" | "staff" | "manual";
+export type AuditAction = "create" | "update" | "delete";
+
+export interface CheckIn {
+  id: number;
+  student_id: number;
+  /** The student's SSO subject — the only identifier the Student model stores. */
+  student_subject: string;
+  task_id: number;
+  ts: string;
+  method: CheckInMethod;
+  /** Set to the acting admin on a manual override; null for self check-ins. */
+  verified_by: string | null;
+}
+
+export interface ManualCheckInCreate {
+  student_subject: string;
+  reason: string;
+  ts?: string | null;
+}
+
+export interface CheckInCorrect {
+  reason: string;
+  method?: CheckInMethod;
+  ts?: string | null;
+}
+
+export interface CheckInRemove {
+  reason: string;
+}
+
+/** One row of the append-only audit ledger. */
+export interface CheckInAudit {
+  id: number;
+  campus_id: string;
+  student_id: number;
+  task_id: number;
+  checkin_id: number | null;
+  action: AuditAction;
+  actor_subject: string;
+  reason: string;
+  ts: string;
+  /** Snapshot of the check-in before the change; null for "create". */
+  prior_state: Record<string, unknown> | null;
+  /** Snapshot after the change; null for "delete". */
+  new_state: Record<string, unknown> | null;
+}

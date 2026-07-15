@@ -236,3 +236,101 @@ class ChallengeSummary(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Manual completion override + audit (FR-D6)
+# ---------------------------------------------------------------------------
+
+CheckInMethod = Literal["event_qr", "staff", "manual"]
+
+
+def _nonblank(v: str) -> str:
+    """Reject whitespace-only input.
+
+    Field(min_length=1) accepts "   " — this is what makes the 422 real.
+    """
+    stripped = v.strip()
+    if not stripped:
+        raise ValueError("must not be blank")
+    return stripped
+
+
+class ManualCheckInCreate(BaseModel):
+    """Admin marks a student complete for a task (FR-D6).
+
+    The student is addressed by ``student_subject`` (their SSO subject) because
+    the Student model deliberately stores no name or campus ID to search by.
+    """
+
+    student_subject: str = Field(..., min_length=1, max_length=255)
+    reason: str = Field(..., min_length=1, max_length=1000)
+    # Defaults to now. Lets an admin backdate a completion to when it happened.
+    ts: datetime | None = None
+
+    @field_validator("student_subject", "reason")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        return _nonblank(v)
+
+
+class CheckInCorrect(BaseModel):
+    """Correct an existing check-in.
+
+    The student cannot be changed here — reassigning is a remove + create, which
+    is two audit rows and the honest description of what happened.
+    """
+
+    reason: str = Field(..., min_length=1, max_length=1000)
+    method: CheckInMethod | None = None
+    ts: datetime | None = None
+
+    @field_validator("reason")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        return _nonblank(v)
+
+
+class CheckInRemove(BaseModel):
+    """Remove a check-in. A reason is required even to delete."""
+
+    reason: str = Field(..., min_length=1, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        return _nonblank(v)
+
+
+class CheckInOut(BaseModel):
+    """A check-in as the admin sees it.
+
+    No from_attributes: ``student_subject`` lives on the Student row, so this is
+    assembled explicitly rather than read off a single ORM object.
+    """
+
+    id: int
+    student_id: int
+    student_subject: str
+    task_id: int
+    ts: datetime
+    method: str
+    verified_by: str | None
+
+
+class CheckInAuditOut(BaseModel):
+    """One row of the append-only audit ledger (FR-D6)."""
+
+    id: int
+    campus_id: str
+    student_id: int
+    task_id: int
+    checkin_id: int | None
+    action: str
+    actor_subject: str
+    reason: str
+    ts: datetime
+    prior_state: dict | None
+    new_state: dict | None
+
+    model_config = {"from_attributes": True}
