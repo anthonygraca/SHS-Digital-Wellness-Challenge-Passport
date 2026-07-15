@@ -11,6 +11,8 @@ export interface Task {
   prize: string;
   required: boolean;
   assessment_items: AssessmentItem[];
+  /** Signed static token rendered as the event QR students scan to check in (US-8). */
+  qr_token: string;
   created_at: string;
   updated_at: string;
 }

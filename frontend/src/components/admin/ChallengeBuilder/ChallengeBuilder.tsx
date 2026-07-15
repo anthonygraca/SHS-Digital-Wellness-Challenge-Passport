@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { useSession } from "../../../auth/SessionProvider";
 import * as api from "../../../api/challenges";
 import type {
@@ -359,6 +360,16 @@ function TaskList({
               <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--wp-on-surface-variant)" }}>
                 {task.caption}
               </p>
+            )}
+
+            {task.qr_token && (
+              <div
+                className={styles.taskQr}
+                aria-label={`Event check-in QR for ${task.title}`}
+              >
+                <QRCodeSVG value={task.qr_token} size={112} marginSize={2} />
+                <span className={styles.taskQrCaption}>Scan to check in</span>
+              </div>
             )}
           </div>
 

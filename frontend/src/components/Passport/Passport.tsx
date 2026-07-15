@@ -1,10 +1,16 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useSession } from "../../auth/SessionProvider";
+import { ApiError } from "../../api/challenges";
 import { EligibilityBlocked } from "../EligibilityBlocked/EligibilityBlocked";
-import { checkIn, fetchPassport } from "../../passport/passport";
-import type { Passport as PassportData, WeekStatus } from "../../types/passport";
+import { checkIn, fetchPassport, scanCheckIn } from "../../passport/passport";
+import type {
+  CheckInResult,
+  Passport as PassportData,
+  WeekStatus,
+} from "../../types/passport";
 import { BoltIcon, CheckCircleIcon, LockIcon, TrophyIcon } from "../icons";
+import { QrScanner } from "./QrScanner";
 import styles from "./Passport.module.css";
 
 const STATUS_LABEL: Record<WeekStatus, string> = {
@@ -77,14 +83,17 @@ function PrizeIndicator({
 }
 
 type OnCheckIn = (weekNo: number) => Promise<void> | void;
+type OnScan = (token: string) => Promise<CheckInResult>;
 
 /** Presentational passport: progress countdown, week tiles, and a detail sheet. */
 export function PassportView({
   passport,
   onCheckIn,
+  onScan,
 }: {
   passport: PassportData;
   onCheckIn?: OnCheckIn;
+  onScan?: OnScan;
 }) {
   const {
     challengeName,
@@ -105,6 +114,11 @@ export function PassportView({
       ? (weeks.find((w) => w.weekNo === selectedWeekNo) ?? null)
       : null;
 
+  // Event-QR scan flow (US-8): scanner overlay, then a success (tip) or error sheet.
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanResult, setScanResult] = useState<CheckInResult | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+
   // Escape closes the detail sheet.
   useEffect(() => {
     if (selectedWeek == null) return;
@@ -122,6 +136,27 @@ export function PassportView({
       await onCheckIn(selectedWeek.weekNo);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function openScanner() {
+    setScanResult(null);
+    setScanError(null);
+    setScannerOpen(true);
+  }
+
+  async function handleDecode(token: string) {
+    if (!onScan) return;
+    setScannerOpen(false);
+    try {
+      const result = await onScan(token);
+      setScanResult(result);
+      setScanError(null);
+    } catch (e) {
+      setScanError(
+        e instanceof ApiError ? e.message : "Check-in failed. Please try again.",
+      );
+      setScanResult(null);
     }
   }
 
@@ -147,6 +182,15 @@ export function PassportView({
           requiredCompleted={requiredCompleted}
           requiredTotal={requiredTotal}
         />
+        {onScan && (
+          <button
+            type="button"
+            className={styles.scanCta}
+            onClick={openScanner}
+          >
+            <BoltIcon size={18} /> Scan QR to check in
+          </button>
+        )}
       </header>
 
       <ul className={styles.grid}>
@@ -234,6 +278,54 @@ export function PassportView({
           </div>
         </div>
       )}
+
+      {scannerOpen && onScan && (
+        <QrScanner
+          onDecode={(token) => void handleDecode(token)}
+          onClose={() => setScannerOpen(false)}
+        />
+      )}
+
+      {(scanResult || scanError) && (
+        <div className={styles.backdrop} onClick={() => { setScanResult(null); setScanError(null); }}>
+          <div
+            className={styles.sheet}
+            role="dialog"
+            aria-modal="true"
+            aria-label={scanResult ? "Check-in complete" : "Check-in failed"}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.sheetHandle} aria-hidden="true" />
+            <button
+              type="button"
+              className={styles.close}
+              onClick={() => { setScanResult(null); setScanError(null); }}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+
+            {scanResult ? (
+              <>
+                <p className={styles.eyebrow}>Week {scanResult.weekNo}</p>
+                <h2 className={styles.sheetTitle}>
+                  <CheckCircleIcon size={22} /> {scanResult.title} complete!
+                </h2>
+                <p className={styles.tip} role="status">
+                  {scanResult.tip}
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 className={styles.sheetTitle}>Couldn't check in</h2>
+                <p className={styles.sheetCaption} role="alert">
+                  {scanError}
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -241,6 +333,7 @@ export function PassportView({
 interface PassportProps {
   fetchData?: () => Promise<PassportData | null>;
   checkInFn?: (weekNo: number) => Promise<PassportData | null>;
+  scanCheckInFn?: (token: string) => Promise<CheckInResult>;
 }
 
 /**
@@ -255,6 +348,7 @@ interface PassportProps {
 export function Passport({
   fetchData = fetchPassport,
   checkInFn = checkIn,
+  scanCheckInFn = scanCheckIn,
 }: PassportProps) {
   const { session, loading, signOut } = useSession();
   const [passport, setPassport] = useState<PassportData | null>(null);
@@ -278,6 +372,14 @@ export function Passport({
     if (updated) setPassport(updated);
   }
 
+  // Scan flow: record the check-in, refresh progress, and let the view surface the
+  // tip. Errors (duplicate / invalid token) propagate for the view to display.
+  async function handleScan(token: string): Promise<CheckInResult> {
+    const result = await scanCheckInFn(token);
+    setPassport(result.passport);
+    return result;
+  }
+
   if (loading) return <div className={styles.center}>Loading…</div>;
   if (!session) return <Navigate to="/" replace />;
   if (!session.isCurrentStudent) return <EligibilityBlocked />;
@@ -287,7 +389,11 @@ export function Passport({
       {dataLoading ? (
         <div className={styles.center}>Loading your passport…</div>
       ) : passport ? (
-        <PassportView passport={passport} onCheckIn={handleCheckIn} />
+        <PassportView
+          passport={passport}
+          onCheckIn={handleCheckIn}
+          onScan={handleScan}
+        />
       ) : (
         <div className={styles.center}>
           No active challenge yet — check back soon.

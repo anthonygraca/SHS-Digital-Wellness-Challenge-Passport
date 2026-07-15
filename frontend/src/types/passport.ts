@@ -27,3 +27,13 @@ export interface Passport {
   prizeEligible: boolean;
   weeks: PassportWeek[];
 }
+
+/** Result of a successful QR check-in (US-8): refreshed passport plus the tip to show. */
+export interface CheckInResult {
+  passport: Passport;
+  /** Personalized post-check-in tip (FR-E1). */
+  tip: string;
+  /** The week that just flipped to complete. */
+  weekNo: number;
+  title: string;
+}
