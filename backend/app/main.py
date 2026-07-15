@@ -6,9 +6,12 @@ from fastapi import FastAPI
 
 from app.db import init_db
 from app.routers import (
+    admin,
     assessments,
     auth,
     challenges,
+    checkins,
+    conversations,
     enrollment,
     guide,
     passport,
@@ -25,13 +28,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SHS Wellness Passport API", version="0.1.0", lifespan=lifespan)
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(enrollment.router)
 app.include_router(challenges.router)
 app.include_router(passport.router)
+app.include_router(checkins.router)
 app.include_router(assessments.router)
 app.include_router(reports.router)
 app.include_router(themes.router)
 app.include_router(guide.router)
+app.include_router(conversations.router)
 
 
 @app.get("/healthz")

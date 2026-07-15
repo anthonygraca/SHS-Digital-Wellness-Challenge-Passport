@@ -22,6 +22,19 @@ def current_claims(request: Request) -> dict | None:
     return verify_session_token(token or "")
 
 
+def get_current_student(request: Request) -> dict:
+    """Get the current authenticated student's claims (US-8, US-15).
+
+    Alias for require_current_student for backward compatibility.
+    Returns claims dict with:
+    - sub: SSO subject
+    - campus_id: Campus identifier
+    - student_id: Database student ID
+    - role: User role (student or admin)
+    """
+    return require_current_student(request)
+
+
 def require_current_student(request: Request) -> dict:
     """Gate a route on current-student eligibility (FR-A3 / US-2).
 

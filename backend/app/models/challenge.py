@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from enum import Enum
 
 from sqlalchemy import (
     JSON,
@@ -21,6 +22,14 @@ from app.db import Base
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class CheckInMethod(str, Enum):
+    """Method used for check-in (US-8, US-15)."""
+
+    EVENT_QR = "event_qr"
+    STAFF = "staff"
+    MANUAL = "manual"
 
 
 class Challenge(Base):
@@ -64,10 +73,16 @@ class Challenge(Base):
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
-    tasks: Mapped[list[Task]] = relationship(
+    tasks: Mapped[list["Task"]] = relationship(
         "Task",
         back_populates="challenge",
         order_by="Task.position",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    enrollments: Mapped[list["Enrollment"]] = relationship(
+        "Enrollment",
+        back_populates="challenge",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
@@ -88,7 +103,6 @@ class Task(Base):
     challenge_id: Mapped[int] = mapped_column(
         ForeignKey("challenges.id", ondelete="CASCADE"), nullable=False, index=True
     )
-
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     caption: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -99,6 +113,9 @@ class Task(Base):
     prize: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    # SHS-approved content reference for grounding AI tips (US-15, FR-E1)
+    content_tags: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
@@ -106,8 +123,8 @@ class Task(Base):
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
-    challenge: Mapped[Challenge] = relationship("Challenge", back_populates="tasks")
-    assessment_items: Mapped[list[AssessmentItem]] = relationship(
+    challenge: Mapped["Challenge"] = relationship("Challenge", back_populates="tasks")
+    assessment_items: Mapped[list["AssessmentItem"]] = relationship(
         "AssessmentItem",
         back_populates="task",
         cascade="all, delete-orphan",
@@ -116,11 +133,12 @@ class Task(Base):
 
 
 class CheckIn(Base):
-    """A recorded task completion (architecture-plan.md §5, FR-D4).
+    """A recorded task completion (architecture-plan.md §5, FR-D1, FR-D2, FR-D4, US-8, US-15).
 
     US-5 only *reads* these to derive week status and the countdown; the scan/validate
     write path is US-8. ``method`` is one of ``event_qr`` / ``staff`` / ``manual``. The
-    unique pair prevents a week being completed twice.
+    unique pair prevents a week being completed twice. Also triggers personalized tip
+    generation (US-15) at check-in time.
     """
 
     __tablename__ = "checkins"
@@ -143,11 +161,12 @@ class CheckIn(Base):
 
 
 class Enrollment(Base):
-    """A student's enrollment in a challenge (FR-C1 / US-3).
+    """A student's enrollment in a challenge (FR-C1 / US-3, US-15).
 
     Links a student to the challenge they joined. The composite unique
     constraint on (student_id, challenge_id) makes enrollment idempotent — a
-    student cannot enroll in the same challenge twice.
+    student cannot enroll in the same challenge twice. Students must enroll
+    before checking in.
     """
 
     __tablename__ = "enrollments"
@@ -169,6 +188,8 @@ class Enrollment(Base):
     enrolled_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
+
+    challenge: Mapped["Challenge"] = relationship("Challenge", back_populates="enrollments")
 
 
 class AssessmentItem(Base):

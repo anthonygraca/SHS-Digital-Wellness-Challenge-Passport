@@ -21,6 +21,7 @@ import type {
 import { useTheme } from "../../theme/ThemeProvider";
 import { resolveThemeCopy } from "../../theme/themes";
 import CrisisResources from "../CrisisResources/CrisisResources";
+import { WellnessGuide } from "../WellnessGuide/WellnessGuide";
 import { BoltIcon, CheckCircleIcon, LockIcon, TrophyIcon } from "../icons";
 import { KnowledgeCheck } from "./KnowledgeCheck";
 import { QrScanner } from "./QrScanner";
@@ -201,6 +202,8 @@ export function PassportView({
     setSubmitting(true);
     try {
       await onCheckIn(selectedWeek.weekNo);
+      // Close the detail sheet after successful check-in
+      setSelectedWeekNo(null);
     } finally {
       setSubmitting(false);
     }
@@ -444,6 +447,12 @@ export function PassportView({
           </div>
         </div>
       )}
+
+      {/* US-16: Wellness Guide chat interface */}
+      <WellnessGuide 
+        themeName={theme?.name} 
+        personaName={theme?.personaName || "Wellness Guide"}
+      />
     </main>
   );
 }
@@ -456,8 +465,7 @@ interface PassportProps {
 
 /**
  * Passport home (US-5 / FR-C2, FR-C3). Guards against being viewed signed-out,
- * loads the student's weeks + progress, and records manual check-ins. fetchData
- * and checkInFn are injectable for tests.
+ * loads the student's weeks + progress, and records check-ins with personalized tips (US-15).
  *
  * US-2 (FR-A3): current-student eligibility gate. A non-current student is blocked
  * with a friendly message and never sees a passport — checked before the fetch so
@@ -518,8 +526,18 @@ export function Passport({
   }, [passport, applyTheme]);
 
   async function handleCheckIn(weekNo: number) {
-    const updated = await checkInFn(weekNo);
-    if (updated) setPassport(updated);
+    try {
+      // checkInFn now returns the updated passport with tip in the response
+      const updatedPassport = await checkInFn(weekNo);
+      if (updatedPassport) {
+        setPassport(updatedPassport);
+        writePassportSnapshot(updatedPassport);
+      }
+    } catch (error: any) {
+      console.error("Check-in failed:", error);
+      // Error handling - let it propagate or show a message
+      throw error;
+    }
   }
 
   // Scan flow: record the check-in, refresh progress, and let the view surface the

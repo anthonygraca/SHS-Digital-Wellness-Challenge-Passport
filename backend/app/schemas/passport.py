@@ -12,6 +12,7 @@ class WeekOut(BaseModel):
     """One passport tile. Field names are camelCase for the SPA (no aliases)."""
 
     weekNo: int
+    taskId: int  # Added for US-15: needed for check-in endpoint
     title: str
     caption: str
     activityType: str

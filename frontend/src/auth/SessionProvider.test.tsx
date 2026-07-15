@@ -22,6 +22,7 @@ const asSession = (over: Partial<Session> = {}): Session => ({
   subject: "abc@csub.edu",
   affiliation: "student",
   isCurrentStudent: true,
+  student_id: 1,
   ...over,
 });
 
