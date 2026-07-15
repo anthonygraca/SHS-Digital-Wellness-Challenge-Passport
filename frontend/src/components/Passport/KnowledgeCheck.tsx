@@ -168,9 +168,13 @@ export function KnowledgeCheck({
 
   useEffect(() => {
     let active = true;
-    void fetchItems(weekNo).then((fetched) => {
-      if (active) setItems(fetched);
-    });
+    void fetchItems(weekNo)
+      // fetchWeekItems already answers [] on failure; this catch is for anything
+      // that gets past it, so a broken quiz fetch can never take the sheet with it.
+      .catch(() => [])
+      .then((fetched) => {
+        if (active) setItems(fetched);
+      });
     return () => {
       active = false;
     };

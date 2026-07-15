@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Passport, PassportView } from "./Passport";
@@ -32,6 +32,15 @@ vi.mock("./QrScanner", () => ({
     </button>
   ),
 }));
+// The sheet mounts KnowledgeCheck with its real defaults, so stub the fetch it makes.
+// Defaults to no questions — most weeks have none, and that is the shape every other
+// test in this file assumes. KnowledgeCheck.test.tsx owns the quiz behaviour itself.
+const assessments = vi.hoisted(() => ({ fetchWeekItems: vi.fn(), submitMcq: vi.fn() }));
+vi.mock("../../passport/assessments", () => assessments);
+
+beforeEach(() => {
+  assessments.fetchWeekItems.mockResolvedValue([]);
+});
 
 afterEach(() => {
   sessionState.session = null;
@@ -229,6 +238,42 @@ describe("PassportView check-in (event detail + manual unlock)", () => {
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
     const sheet = screen.getByRole("dialog");
     expect(within(sheet).getByText("Dates TBA")).toBeInTheDocument();
+  });
+});
+
+describe("PassportView knowledge check (US-18 / FR-E4)", () => {
+  const mcq = {
+    id: 7,
+    weekNo: 4,
+    prompt: "How often should a healthy adult have an eye exam?",
+    outcomeTag: "vision-care",
+    options: ["Every 1-2 years", "Once, when I turn 18"],
+    yourResponse: null,
+  };
+
+  it("shows the tapped week's knowledge check inside the sheet", async () => {
+    assessments.fetchWeekItems.mockResolvedValue([mcq]);
+    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
+
+    const sheet = screen.getByRole("dialog");
+    expect(await within(sheet).findByText(mcq.prompt)).toBeInTheDocument();
+    // The sheet must ask for the week it opened, not the first or the last.
+    expect(assessments.fetchWeekItems).toHaveBeenCalledWith(4);
+  });
+
+  it("still offers check-in for a week with no knowledge check", async () => {
+    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
+
+    // The quiz does not gate the core loop: no questions, no missing button.
+    const sheet = screen.getByRole("dialog");
+    expect(
+      within(sheet).getByRole("button", { name: /^check in$/i }),
+    ).toBeInTheDocument();
+    expect(within(sheet).queryByText(/knowledge check/i)).not.toBeInTheDocument();
   });
 });
 
