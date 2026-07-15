@@ -269,6 +269,76 @@ for it. Worth knowing before US-19 adds the reflection surface and meets the sam
 also assumes a fuller Material 3 token set (`--wp-secondary-container` and friends) that
 `theme/tokens.css` does not define, and an undefined custom property is not a fallback, it is nothing.
 
+**As built (US-19 / FR-E5).** `ai_feedback` landed exactly as predicted two paragraphs up — nullable,
+additive, no schema fight. The prediction was half right: `create_all` does not add a column to an
+existing table, so the "no cost" is a fresh `make clean` for every dev, and it fails *silently* if
+skipped (the column simply is not there and every reflection submit 500s on insert). Nullable buys the
+absence of an Alembic migration, not the absence of a rebuild. Six things are not readable off the code:
+
+**Nothing here is AI, and the schema does not claim otherwise.** §6.3 says Claude scores the reflection.
+Claude does not, yet. `services/reflection_scoring.py` defines a `ReflectionScorer` Protocol and
+`score_reflection` takes one as a *parameter*, so the route does `Depends(get_reflection_scorer)` and a
+model drops in behind the seam without touching the service, the routes, the schemas, the storage, or
+the UI. What is behind it today is `StubReflectionScorer`: rubric-vocabulary overlap plus length. It
+cannot tell a thoughtful paragraph from one that quotes the rubric back — the latter scores *higher*,
+and a test pins that so the weakness is recorded rather than discovered. Hence `scored_by` is `"auto"`
+and never `"ai"`, and the student-facing callout says "Guide feedback" (the app's persona, per mockup
+S6) rather than "AI feedback": a stub behind an AI label is the app lying to a student about where a
+grade came from. The seam is also why the scorer is injected via `dependency_overrides` rather than
+monkeypatched — it is the mechanism `conftest` already uses for `get_db`, and the suite still contains
+no `monkeypatch`.
+
+**Why overlap and not just length:** FR-E5 says *scored against the rubric*. A word count never touches
+the rubric, so the acceptance test would assert something the code does not do. Overlap is a shallow
+signal but a genuine function of the rubric, and monotone — which is what makes it defensible rather
+than arbitrary. The BDD step asserts `0.0 < score < 1.0`, because a bare 0.0 or 1.0 is indistinguishable
+from a constant.
+
+**A scorer that cannot answer refuses, and stores nothing** (503, the only one in the app). This is not
+a promise in a comment: `db.add` sits *after* the scorer call, so every failure above it returns before
+the session is touched. It matters because a reflection is one attempt — a student who cannot tell
+whether a failed submit burned it has to assume it did, which is why the copy says "Nothing was
+recorded" and why the test that earns its place is *"still answerable after a 503"* rather than the row
+count. The client mirrors it: the textarea locks on success only, never in a `finally`.
+
+**Out-of-range scorer output is refused, not clamped.** A scorer returning 1.4 is broken; clamping to
+1.0 invents a grade and skews the FR-F4 per-outcome mean with a number that looks exactly like a real
+one. The check lives in the service rather than a schema because the scorer's output never passes
+through one.
+
+**The override keeps `ai_feedback`, and there is no audit table.** FR-D6 mandates a ledger and a
+mandatory reason for a check-in override; FR-E5 asks only that `scored_by` become `"human"`, and that
+field on the row *is* the record — `CheckInAudit` is check-in-shaped and not reusable, and a table
+nothing requires is the same debt as a column nothing can write. Given no ledger, the retained
+`ai_feedback` beside `scored_by="human"` is the *only* trace an override leaves: `scored_by` answers
+"is this the machine's score?", the feedback answers "what did the machine say?", and clearing it would
+destroy the only evidence of the thing being overridden. The cost is real and visible — a hand-set 90%
+can sit beside "This is quite brief" — but that is a labelling problem, and the fix if it ever needs
+one is an additive nullable admin note, not deleting evidence. For the same reason there is no
+`human_feedback` column yet: nothing can write it.
+
+**The admin routes hang off `/api/challenges/{cid}/tasks/{tid}/items/{iid}/responses`,** not
+`/api/assessments`, so the existing `_get_challenge_or_404` → `_get_task_or_404` → `_get_item_or_404`
+chain supplies campus isolation and 404 semantics for free. The student-side `_item_in_active_challenge`
+cannot serve an admin: it resolves the campus's *active* challenge, so publishing next semester's would
+strand last semester's scores behind a 404 — an admin must still be able to read and fix them. The
+service functions live in `services/assessments.py` (which owns `AssessmentResponse`) rather than
+`services/challenges.py` (which owns authoring), following the one-service-per-concern split
+`services/checkins.py` documents.
+
+**A live bug the reflection surface would have shipped.** `_stored_view` computed `correct = score ==
+1.0`. The moment `list_week_items` stopped filtering reflections out, a reflection scoring 0.6 came back
+`correct: false` and would have rendered "Incorrect" — a verdict a rubric score cannot support. `correct`
+is now `bool | None`, null for reflections, and `feedback` is its mirror image: null for every MCQ, whose
+feedback is composed from the answer key at scoring time and never stored. Each item type reports what it
+can actually prove, and a reflection re-visit can restate its feedback where an MCQ re-visit cannot.
+
+**The mockup wall predicted above, met.** S6 draws one Submit under both cards; this ships one per card.
+A shared button that half-succeeds — MCQ 201, reflection 503 — has no honest state to render, and each
+item is separately one-attempt anyway. The `--wp-secondary-container` prediction also held: the Guide
+callout uses `--wp-secondary`/`--wp-on-secondary` for the reason given above. The score renders as a
+percentage, not the mockup's "4/5" — that value is a static mock, and the API's score is a fraction.
+
 **As built (US-23 / FR-F3).** `ContentView` ships as the sketch above reserved it — `(student_id,
 task_id, content_ref, ts)` in `models/engagement.py` — plus a `GuideSession(student_id, challenge_id,
 started_at)` the sketch never named, because §10 promises "ContentViews + chat sessions per student"
@@ -362,10 +432,13 @@ resources. **Guardrails (non-negotiable):**
 - No PHI collected in chat; conversation minimally logged for improvement.
 
 ### 6.3 Automated assessment (replaces hand-scored paper)
-- **MCQ knowledge checks:** auto-scored instantly.
-- **Reflections:** Claude scores free-text against a per-item rubric mapped to a
-  `learning_outcome_tag`, producing a score + short feedback. Aggregates into the learning-outcomes
-  report Lauren scores by hand today. Human can override (`scored_by = human`).
+- **MCQ knowledge checks:** auto-scored instantly. *Built — US-18 / FR-E4.*
+- **Reflections:** free-text scored against a per-item rubric mapped to a `learning_outcome_tag`,
+  producing a score + short feedback. Aggregates into the learning-outcomes report Lauren scores by
+  hand today. Human can override (`scored_by = human`). *Built — US-19 / FR-E5, except the scorer:
+  Claude is not wired in. The whole path — submit, score, store, show, override — runs against a
+  deterministic stub behind the `ReflectionScorer` seam, so the model is a drop-in and nothing else
+  moves. See §5's "As built (US-19)" before quoting this line at a demo.*
 
 ### 6.4 AI-assisted admin builder (the sleeper feature)
 Erika authors challenges as a Word doc today (we have the Stranger Things one). Let the admin **paste
