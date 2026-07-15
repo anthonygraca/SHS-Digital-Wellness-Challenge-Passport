@@ -1,0 +1,1220 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { ApiError } from "../../../api/http";
+import type { ChallengeSummary } from "../../../types/challenge";
+import type {
+  AttendanceReport,
+  EngagementReport,
+  LearningOutcomeReport,
+  ParticipationReport,
+  WeekCompletion,
+} from "../../../types/report";
+import { Reports } from "./Reports";
+// vite.config.ts sets `css: true`, so these resolve to the real generated class
+// names — the stacked bar's segments carry no role to query them by.
+import styles from "./Reports.module.css";
+
+const navigate = vi.fn();
+
+const api = vi.hoisted(() => ({
+  getParticipationReport: vi.fn(),
+  getAttendanceReport: vi.fn(),
+  getEngagementReport: vi.fn(),
+  getLearningOutcomeReport: vi.fn(),
+  exportPrizeCsv: vi.fn(),
+  listChallenges: vi.fn(),
+}));
+
+vi.mock("react-router-dom", () => ({
+  useNavigate: () => navigate,
+}));
+// Partial mock: the real ApiError must survive, since the component branches on
+// `instanceof` to tell "nothing published" apart from a genuine failure.
+vi.mock("../../../api/reports", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../api/reports")>()),
+  getParticipationReport: api.getParticipationReport,
+  getAttendanceReport: api.getAttendanceReport,
+  getEngagementReport: api.getEngagementReport,
+  getLearningOutcomeReport: api.getLearningOutcomeReport,
+  exportPrizeCsv: api.exportPrizeCsv,
+}));
+// The challenge list feeds the selector only, and comes from the challenges
+// module rather than the reports one — it is the control's data, not a report.
+vi.mock("../../../api/challenges", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../api/challenges")>()),
+  listChallenges: api.listChallenges,
+}));
+
+// jsdom implements neither, and the export hands its blob to the browser through
+// both. Stubbed rather than faked: what matters is the anchor they feed.
+const objectUrl = "blob:prize-list";
+const createObjectURL = vi.fn();
+const revokeObjectURL = vi.fn();
+URL.createObjectURL = createObjectURL;
+URL.revokeObjectURL = revokeObjectURL;
+
+/** The synthetic anchor the component clicks, captured at click time. */
+function captureDownload() {
+  const clicked: { href: string; download: string }[] = [];
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: HTMLAnchorElement,
+  ) {
+    clicked.push({ href: this.href, download: this.download });
+  });
+  return clicked;
+}
+
+// resetAllMocks, not clearAllMocks: clearAllMocks leaves mockResolvedValueOnce
+// queues in place, which the beforeEach defaults below would sit behind. The
+// vi.mock factory closes over these same fn objects, so the wiring survives.
+// restoreAllMocks first, to lift the anchor-click spy captureDownload installs —
+// reset alone would leave it stubbed for every later test.
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.resetAllMocks();
+});
+
+beforeEach(() => {
+  // Re-armed here rather than at vi.fn(): resetAllMocks above wipes every mock's
+  // implementation, this one included, and a createObjectURL returning undefined
+  // fails as a wrong href rather than as a missing stub.
+  createObjectURL.mockReturnValue(objectUrl);
+  // The four cards load together under one Promise.all, so a test about the
+  // funnel still needs attendance, engagement and outcomes to resolve. Individual
+  // tests override. A fifth card added to that Promise.all needs a default here
+  // too, or every test in this file fails on the card it never mentions.
+  api.getParticipationReport.mockResolvedValue(asReport());
+  api.getAttendanceReport.mockResolvedValue(asAttendance());
+  api.getEngagementReport.mockResolvedValue(asEngagement());
+  api.getLearningOutcomeReport.mockResolvedValue(asOutcomes());
+  // One published challenge by default: the selector only appears when there is a
+  // choice to make, so this keeps it out of the way of the card tests.
+  api.listChallenges.mockResolvedValue([asChallenge(1, "Fall 2026")]);
+});
+
+const asWeek = (week_no: number, completed_count: number): WeekCompletion => ({
+  task_id: 100 + week_no,
+  week_no,
+  title: `Week ${week_no}`,
+  required: true,
+  completed_count,
+});
+
+const asReport = (over: Partial<ParticipationReport> = {}): ParticipationReport => ({
+  challenge: {
+    id: 1,
+    name: "Stranger Things Wellness",
+    semester: "Fall 2026",
+    theme_id: "stranger-things",
+  },
+  total_enrollments: 40,
+  weeks: [asWeek(1, 40), asWeek(2, 30), asWeek(3, 20), asWeek(4, 10)],
+  ...over,
+});
+
+/** 91 / 9 is the design prototype's own split, so fixture and card agree. */
+const asAttendance = (over: Partial<AttendanceReport> = {}): AttendanceReport => ({
+  challenge: {
+    id: 1,
+    name: "Stranger Things Wellness",
+    semester: "Fall 2026",
+    theme_id: "stranger-things",
+  },
+  total_checkins: 100,
+  methods: [
+    { method: "event_qr", count: 91 },
+    { method: "staff", count: 0 },
+    { method: "manual", count: 9 },
+  ],
+  ...over,
+});
+
+/**
+ * Views split across the two refs a student can meet content through, plus the
+ * guide's structural zero — the shape the report has until US-16 ships a guide.
+ */
+const asEngagement = (over: Partial<EngagementReport> = {}): EngagementReport => ({
+  challenge: {
+    id: 1,
+    name: "Stranger Things Wellness",
+    semester: "Fall 2026",
+    theme_id: "stranger-things",
+  },
+  total_content_views: 150,
+  content_views: [
+    { content_ref: "week_detail", count: 120 },
+    { content_ref: "tip", count: 30 },
+  ],
+  guide_sessions: 0,
+  ...over,
+});
+
+/**
+ * Two scored tags and one nobody has answered, plus the human bucket's structural
+ * zero — the shape the report has until US-19 ships the reflection override.
+ *
+ * Alphabetical, because the server orders that way and the card does not re-sort.
+ * The means are 0.84 and 0.79, the prototype's own numbers, so fixture and card
+ * agree. total_responses is 200 against a 0.82 mean that is deliberately *not* the
+ * average of 0.84 and 0.79 (0.815): the total is weighted by response, and a card
+ * that recomputed it from the rows would land on the wrong number.
+ */
+const asOutcomes = (over: Partial<LearningOutcomeReport> = {}): LearningOutcomeReport => ({
+  challenge: {
+    id: 1,
+    name: "Stranger Things Wellness",
+    semester: "Fall 2026",
+    theme_id: "stranger-things",
+  },
+  total_responses: 200,
+  mean_score: 0.82,
+  total_human_scored: 0,
+  outcomes: [
+    {
+      outcome_tag: "know-your-numbers",
+      mean_score: 0.84,
+      response_count: 120,
+      human_scored_count: 0,
+    },
+    {
+      outcome_tag: "sleep-hygiene",
+      mean_score: null,
+      response_count: 0,
+      human_scored_count: 0,
+    },
+    {
+      outcome_tag: "stress-management",
+      mean_score: 0.79,
+      response_count: 80,
+      human_scored_count: 0,
+    },
+  ],
+  ...over,
+});
+
+const asChallenge = (id: number, semester: string): ChallengeSummary => ({
+  id,
+  campus_id: "csub",
+  name: "Stranger Things Wellness",
+  semester,
+  start_date: "2026-09-01",
+  end_date: "2026-12-15",
+  theme_id: "stranger-things",
+  status: "published",
+  created_at: "2026-08-01T00:00:00Z",
+  updated_at: "2026-08-01T00:00:00Z",
+});
+
+/** The funnel rows, in the order they are rendered. */
+const funnelRows = () =>
+  within(screen.getByRole("list", { name: /per-week completion funnel/i })).getAllByRole(
+    "listitem",
+  );
+
+describe("Participation & completion funnel report (US-21 / FR-F1)", () => {
+  it("shows total enrollments for the active challenge", async () => {
+    api.getParticipationReport.mockResolvedValue(asReport());
+
+    render(<Reports />);
+
+    expect(await screen.findByRole("status")).toHaveTextContent("40");
+    expect(screen.getByText("Enrolled")).toBeInTheDocument();
+    expect(screen.getByText(/fall 2026 · stranger things wellness/i)).toBeInTheDocument();
+  });
+
+  it("shows the count of students completing each week, as a funnel", async () => {
+    api.getParticipationReport.mockResolvedValue(asReport());
+
+    render(<Reports />);
+    const rows = await screen.findByRole("list", { name: /per-week completion funnel/i });
+
+    // Every week in week order, each with its count and share of the cohort —
+    // the drop-off from 40 down to 10 read top to bottom.
+    expect(within(rows).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Week 140 · 100%",
+      "Week 230 · 75%",
+      "Week 320 · 50%",
+      "Week 410 · 25%",
+    ]);
+  });
+
+  it("sizes each bar to the share of enrolled students who finished", async () => {
+    api.getParticipationReport.mockResolvedValue(asReport());
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /per-week completion funnel/i });
+
+    const widths = funnelRows().map(
+      (li) => (li.querySelector("span > span") as HTMLElement).style.width,
+    );
+    expect(widths).toEqual(["100%", "75%", "50%", "25%"]);
+  });
+
+  it("refreshing picks up a new check-in for week 4", async () => {
+    const before = asReport();
+    const after = asReport({
+      weeks: [asWeek(1, 40), asWeek(2, 30), asWeek(3, 20), asWeek(4, 11)],
+    });
+    api.getParticipationReport.mockResolvedValueOnce(before).mockResolvedValue(after);
+
+    render(<Reports />);
+    expect(await screen.findByText("10 · 25%")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    expect(await screen.findByText("11 · 28%")).toBeInTheDocument();
+    // Only week 4 moved — the other rungs are untouched.
+    expect(screen.getByText("40 · 100%")).toBeInTheDocument();
+    expect(screen.getByText("30 · 75%")).toBeInTheDocument();
+  });
+
+  it("a campus with nothing published is told to publish, not shown an error", async () => {
+    api.getParticipationReport.mockRejectedValue(
+      new ApiError(404, "There's no active challenge for your campus right now."),
+    );
+
+    render(<Reports />);
+
+    expect(await screen.findByText(/no published challenge yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("a challenge nobody has joined reports 0%, not NaN", async () => {
+    api.getParticipationReport.mockResolvedValue(
+      asReport({ total_enrollments: 0, weeks: [asWeek(1, 0), asWeek(2, 0)] }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /per-week completion funnel/i });
+
+    expect(funnelRows().map((li) => li.textContent)).toEqual([
+      "Week 10 · 0%",
+      "Week 20 · 0%",
+    ]);
+    expect(screen.queryByText(/NaN/)).toBeNull();
+  });
+
+  it("a challenge with no weeks says so instead of drawing an empty funnel", async () => {
+    api.getParticipationReport.mockResolvedValue(asReport({ weeks: [] }));
+
+    render(<Reports />);
+
+    expect(await screen.findByText(/no weeks yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: /funnel/i })).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("40"); // enrollment still shown
+  });
+
+  it("reports a failure when there is nothing on screen yet", async () => {
+    api.getParticipationReport.mockRejectedValue(new ApiError(500, "Server exploded"));
+
+    render(<Reports />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Server exploded");
+  });
+
+  it("a failed refresh keeps the numbers already on screen", async () => {
+    api.getParticipationReport
+      .mockResolvedValueOnce(asReport())
+      .mockRejectedValue(new ApiError(500, "Server exploded"));
+
+    render(<Reports />);
+    expect(await screen.findByText("40 · 100%")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    // Stale numbers beat a blank screen: the admin keeps the last good read.
+    expect(screen.getByText("40 · 100%")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("40");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("goes back to the challenge builder", async () => {
+    api.getParticipationReport.mockResolvedValue(asReport());
+
+    render(<Reports />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: /challenge builder/i }),
+    );
+
+    expect(navigate).toHaveBeenCalledWith("/admin");
+  });
+});
+
+/** The capture-method rows, in the order they are rendered. */
+const methodRows = () =>
+  within(
+    screen.getByRole("list", { name: /attendance capture by method/i }),
+  ).getAllByRole("listitem");
+
+/** The sized segment of the stacked bar — the auto share made visible. */
+const autoSegment = () =>
+  document.querySelector(`.${styles.stackAuto}`) as HTMLElement;
+
+describe("Auto-vs-manual attendance report (US-22 / FR-F2)", () => {
+  it("breaks attendance into an automatic share and everything else", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /attendance capture by method/i });
+
+    // Automatic first — the number the card exists to lead with.
+    expect(methodRows().map((li) => li.textContent)).toEqual([
+      "Auto (event QR)91%",
+      "Manual / staff9%",
+    ]);
+  });
+
+  it("sizes the stacked bar to the automatic share", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /attendance capture by method/i });
+
+    expect(autoSegment().style.width).toBe("91%");
+  });
+
+  it("the manual share is the complement, so the bar can never overflow", async () => {
+    api.getAttendanceReport.mockResolvedValue(
+      asAttendance({
+        total_checkins: 200,
+        methods: [
+          { method: "event_qr", count: 67 },
+          { method: "staff", count: 0 },
+          { method: "manual", count: 133 },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /attendance capture by method/i });
+
+    // Rounding each side independently gives 34% and 67% — a 101% bar. The
+    // complement is what keeps the two rows honest as one whole.
+    expect(methodRows().map((li) => li.textContent)).toEqual([
+      "Auto (event QR)34%",
+      "Manual / staff66%",
+    ]);
+  });
+
+  it("reports the raw counts the percentages come from", async () => {
+    render(<Reports />);
+
+    // The effort figure the story asks for, and the only place the reconciliation
+    // between the buckets and the total is visible to a human.
+    expect(
+      await screen.findByText(/91 of 100 check-ins captured automatically/i),
+    ).toBeInTheDocument();
+  });
+
+  it("a challenge with no check-ins says so, not 100% manual", async () => {
+    api.getAttendanceReport.mockResolvedValue(
+      asAttendance({
+        total_checkins: 0,
+        methods: [
+          { method: "event_qr", count: 0 },
+          { method: "staff", count: 0 },
+          { method: "manual", count: 0 },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+
+    expect(await screen.findByText(/no check-ins recorded yet/i)).toBeInTheDocument();
+    // The complement of 0% is 100%, so without the empty branch this card would
+    // claim every one of zero check-ins was captured by hand.
+    expect(screen.queryByText("100%")).toBeNull();
+    expect(screen.queryByRole("list", { name: /attendance capture/i })).toBeNull();
+    expect(screen.queryByText(/NaN/)).toBeNull();
+  });
+
+  it("a fully manual challenge reads as 0% automatic", async () => {
+    api.getAttendanceReport.mockResolvedValue(
+      asAttendance({
+        total_checkins: 5,
+        methods: [
+          { method: "event_qr", count: 0 },
+          { method: "staff", count: 0 },
+          { method: "manual", count: 5 },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /attendance capture by method/i });
+
+    expect(methodRows().map((li) => li.textContent)).toEqual([
+      "Auto (event QR)0%",
+      "Manual / staff100%",
+    ]);
+    // A 0% segment must collapse, not show a sliver: unlike the funnel's zero
+    // week, there is no empty row to distinguish it from — the manual bar is it.
+    expect(autoSegment().style.width).toBe("0%");
+  });
+
+  it("refreshing picks up newly captured QR check-ins", async () => {
+    api.getAttendanceReport
+      .mockResolvedValueOnce(asAttendance())
+      .mockResolvedValue(
+        asAttendance({
+          total_checkins: 110,
+          methods: [
+            { method: "event_qr", count: 101 },
+            { method: "staff", count: 0 },
+            { method: "manual", count: 9 },
+          ],
+        }),
+      );
+
+    render(<Reports />);
+    expect(await screen.findByText(/91 of 100/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    expect(await screen.findByText(/101 of 110/i)).toBeInTheDocument();
+    expect(methodRows()[0]).toHaveTextContent("92%");
+  });
+
+  it("a failed refresh keeps both cards on screen", async () => {
+    api.getAttendanceReport
+      .mockResolvedValueOnce(asAttendance())
+      .mockRejectedValue(new ApiError(500, "Server exploded"));
+
+    render(<Reports />);
+    expect(await screen.findByText(/91 of 100/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    // One failed fetch takes the whole Promise.all down, so neither card updates
+    // — and neither is blanked. The funnel is still here despite the failure
+    // being on the attendance side.
+    expect(screen.getByText(/91 of 100/i)).toBeInTheDocument();
+    expect(screen.getByText("40 · 100%")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("a campus with nothing published shows no attendance card", async () => {
+    const notFound = new ApiError(
+      404,
+      "There's no active challenge for your campus right now.",
+    );
+    api.getParticipationReport.mockRejectedValue(notFound);
+    api.getAttendanceReport.mockRejectedValue(notFound);
+
+    render(<Reports />);
+
+    expect(await screen.findByText(/no published challenge yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/attendance capture/i)).toBeNull();
+  });
+});
+
+describe("Prize-eligible CSV export (US-26 / FR-F5)", () => {
+  const asCsv = (filename = "prize-eligible-Fall-2026-1.csv") => ({
+    blob: new Blob(["student_id,sso_subject\n"], { type: "text/csv" }),
+    filename,
+  });
+
+  const exportButton = () =>
+    screen.getByRole("button", { name: /export prize list \(csv\)/i });
+
+  it("downloads the prize list under the name the server gave it", async () => {
+    api.exportPrizeCsv.mockResolvedValue(asCsv());
+    const clicked = captureDownload();
+
+    render(<Reports />);
+    await userEvent.click(await screen.findByRole("button", { name: /export prize/i }));
+
+    // The filename is the server's, not rebuilt here: two admins exporting the
+    // same challenge should end up with the same file on disk.
+    expect(clicked).toEqual([
+      { href: objectUrl, download: "prize-eligible-Fall-2026-1.csv" },
+    ]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("releases the object URL once the download is handed over", async () => {
+    api.exportPrizeCsv.mockResolvedValue(asCsv());
+    captureDownload();
+
+    render(<Reports />);
+    await userEvent.click(await screen.findByRole("button", { name: /export prize/i }));
+
+    // Un-revoked object URLs pin their blob in memory for the life of the tab,
+    // and an admin can export repeatedly while running a drawing.
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith(objectUrl);
+  });
+
+  it("never renders the exported rows on the dashboard", async () => {
+    api.exportPrizeCsv.mockResolvedValue(asCsv());
+    captureDownload();
+
+    render(<Reports />);
+    await userEvent.click(await screen.findByRole("button", { name: /export prize/i }));
+
+    // The file is per-student; the screen stays aggregate (FR-F6). The CSV goes
+    // to the downloads folder and nowhere else.
+    expect(screen.queryByText(/sso_subject/i)).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("40");
+  });
+
+  it("says so when the export fails", async () => {
+    api.exportPrizeCsv.mockRejectedValue(new ApiError(500, "Server exploded"));
+    const clicked = captureDownload();
+
+    render(<Reports />);
+    await userEvent.click(await screen.findByRole("button", { name: /export prize/i }));
+
+    // Unlike a failed refresh, a failed export has no stale copy to fall back on
+    // — silence would look like a download that simply never arrived.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Server exploded");
+    expect(clicked).toEqual([]);
+  });
+
+  it("re-enables the button after a failed export so it can be retried", async () => {
+    api.exportPrizeCsv
+      .mockRejectedValueOnce(new ApiError(500, "Server exploded"))
+      .mockResolvedValue(asCsv());
+    const clicked = captureDownload();
+
+    render(<Reports />);
+    await userEvent.click(await screen.findByRole("button", { name: /export prize/i }));
+    await screen.findByRole("alert");
+
+    expect(exportButton()).toBeEnabled();
+    await userEvent.click(exportButton());
+
+    expect(clicked).toHaveLength(1);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("offers no export when the campus has nothing published", async () => {
+    api.getParticipationReport.mockRejectedValue(
+      new ApiError(404, "There's no active challenge for your campus right now."),
+    );
+
+    render(<Reports />);
+    await screen.findByText(/no published challenge yet/i);
+
+    // No challenge means no drawing — a button here could only 404.
+    expect(screen.queryByRole("button", { name: /export prize/i })).toBeNull();
+  });
+});
+
+/** The content-view rows, in the order they are rendered. */
+const contentRows = () =>
+  within(screen.getByRole("list", { name: /content views by type/i })).getAllByRole(
+    "listitem",
+  );
+
+/** The sized fill of one content row's bar — a count made visible. */
+const contentFills = () =>
+  Array.from(
+    document.querySelectorAll<HTMLElement>(`.${styles.contentFill}`),
+  );
+
+describe("Engagement report (US-23 / FR-F3)", () => {
+  it("breaks content views down by what was viewed", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /content views by type/i });
+
+    // Week details first — the view a student chooses to make, and the order the
+    // API fixes. Counts, not percentages: the story asks how much students use
+    // the content, and 120 is that answer.
+    expect(contentRows().map((li) => li.textContent)).toEqual([
+      "Week details120",
+      "Tips after scan30",
+    ]);
+  });
+
+  it("reports the total the rows add up to", async () => {
+    render(<Reports />);
+
+    expect(await screen.findByText(/150 content views in total/i)).toBeInTheDocument();
+  });
+
+  it("sizes each bar to that ref's share of the views", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /content views by type/i });
+
+    expect(contentFills().map((el) => el.style.width)).toEqual(["80%", "20%"]);
+  });
+
+  it("says the guide is unavailable rather than showing a bare zero", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /content views by type/i });
+
+    // "0" next to "Guide chat sessions" reads as "nobody used it". Nobody *can*
+    // yet — the guide is US-16 — and those are different findings for an admin.
+    expect(
+      screen.getByText(/no guide sessions yet — the wellness guide isn’t available/i),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the guide count once sessions exist", async () => {
+    api.getEngagementReport.mockResolvedValue(asEngagement({ guide_sessions: 217 }));
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /content views by type/i });
+
+    // The zero above is a structural fact, not a hard-coded one: when US-16 starts
+    // writing sessions, this card shows them with no further change.
+    expect(screen.getByText("217")).toBeInTheDocument();
+    expect(screen.queryByText(/no guide sessions yet/i)).toBeNull();
+  });
+
+  it("a challenge with no views says so, not a row of zeroes", async () => {
+    api.getEngagementReport.mockResolvedValue(
+      asEngagement({
+        total_content_views: 0,
+        content_views: [
+          { content_ref: "week_detail", count: 0 },
+          { content_ref: "tip", count: 0 },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByText(/no content viewed yet/i);
+
+    expect(screen.queryByRole("list", { name: /content views by type/i })).toBeNull();
+    expect(screen.queryByText(/NaN/)).toBeNull();
+  });
+
+  it("counts one view as a view, not views", async () => {
+    api.getEngagementReport.mockResolvedValue(
+      asEngagement({
+        total_content_views: 1,
+        content_views: [
+          { content_ref: "week_detail", count: 1 },
+          { content_ref: "tip", count: 0 },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+
+    expect(await screen.findByText(/1 content view in total/i)).toBeInTheDocument();
+  });
+
+  it("refreshing picks up newly recorded views", async () => {
+    api.getEngagementReport
+      .mockResolvedValueOnce(asEngagement())
+      .mockResolvedValue(
+        asEngagement({
+          total_content_views: 160,
+          content_views: [
+            { content_ref: "week_detail", count: 130 },
+            { content_ref: "tip", count: 30 },
+          ],
+        }),
+      );
+
+    render(<Reports />);
+    expect(await screen.findByText(/150 content views in total/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    expect(await screen.findByText(/160 content views in total/i)).toBeInTheDocument();
+    expect(contentRows()[0]).toHaveTextContent("130");
+  });
+
+  it("a campus with nothing published shows no engagement card", async () => {
+    const notFound = new ApiError(
+      404,
+      "There's no active challenge for your campus right now.",
+    );
+    api.getParticipationReport.mockRejectedValue(notFound);
+    api.getAttendanceReport.mockRejectedValue(notFound);
+    api.getEngagementReport.mockRejectedValue(notFound);
+
+    render(<Reports />);
+
+    expect(await screen.findByText(/no published challenge yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/content views by type/i)).toBeNull();
+  });
+
+  it("a failed refresh keeps all three cards on screen", async () => {
+    api.getEngagementReport
+      .mockResolvedValueOnce(asEngagement())
+      .mockRejectedValue(new ApiError(500, "Server exploded"));
+
+    render(<Reports />);
+    expect(await screen.findByText(/150 content views in total/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    // One failed fetch takes the whole Promise.all down, so no card updates — and
+    // none is blanked. The funnel and attendance are still here despite the
+    // failure being on the engagement side.
+    expect(screen.getByText(/150 content views in total/i)).toBeInTheDocument();
+    expect(screen.getByText(/91 of 100/i)).toBeInTheDocument();
+    expect(screen.getByText("40 · 100%")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+const selector = () => screen.getByRole("combobox", { name: /challenge/i });
+
+const TWO_CHALLENGES = [asChallenge(1, "Fall 2026"), asChallenge(2, "Spring 2026")];
+
+/** The scored outcome rows, in the order they are rendered. */
+const outcomeRows = () =>
+  within(
+    screen.getByRole("list", { name: /mean score by learning outcome/i }),
+  ).getAllByRole("listitem");
+
+/** The sized fill of one outcome row's bar — a mean made visible. */
+const outcomeFills = () =>
+  Array.from(document.querySelectorAll<HTMLElement>(`.${styles.outcomeFill}`));
+
+describe("Learning-outcome report (US-24 / FR-F4)", () => {
+  it("groups scores by outcome tag", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // One row per tag, each carrying its own mean — not one row per question, and
+    // not one per student.
+    expect(outcomeRows().map((li) => li.textContent)).toEqual([
+      "Know your numbers84%",
+      "Stress management79%",
+    ]);
+  });
+
+  it("keeps the server's order instead of ranking by score", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        outcomes: [
+          {
+            outcome_tag: "alpha-outcome",
+            mean_score: 0.1,
+            response_count: 100,
+            human_scored_count: 0,
+          },
+          {
+            outcome_tag: "zebra-outcome",
+            mean_score: 0.9,
+            response_count: 100,
+            human_scored_count: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // The scores oppose the names on purpose. The default fixture's 84/79 happen to
+    // fall alphabetically too, so it would pass this by coincidence — and a card
+    // that ranked worst-first or best-first would go undetected.
+    //
+    // The order is the server's ORDER BY, and the card does not re-sort: an outcome
+    // tag is admin-authored, so there is no sequence to impose here, and ranking by
+    // score would move a row every time its mean crossed a rounding boundary —
+    // reshuffling the card under an admin who just hit Refresh.
+    expect(outcomeRows().map((li) => li.textContent)).toEqual([
+      "Alpha outcome10%",
+      "Zebra outcome90%",
+    ]);
+  });
+
+  it("renders the mean as a percentage, not the raw fraction", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // 0.84 arrives; "84%" is shown. The server ships the aggregate and the client
+    // decides what it looks like — the same split the attendance card's share follows.
+    expect(screen.getByText("84%")).toBeInTheDocument();
+    expect(screen.queryByText("0.84")).toBeNull();
+  });
+
+  it("sizes each bar to that outcome's mean", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // A mean is already a proportion — it fills a bar without a denominator, which
+    // is why this card needs no total to divide by the way the others do.
+    expect(outcomeFills().map((el) => el.style.width)).toEqual(["84%", "79%"]);
+  });
+
+  it("reports the weighted average and the count it was taken over", async () => {
+    render(<Reports />);
+
+    // 82%, the server's response-weighted mean — pointedly not 81.5%, the average
+    // of the two rows. A card that recomputed the total from what it rendered
+    // would let 80 responses outvote 120 and land on the wrong number.
+    expect(await screen.findByText(/200 responses · 82% average/i)).toBeInTheDocument();
+  });
+
+  it("names the tags nobody has answered instead of drawing them a bar", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // sleep-hygiene has items but no responses. A 0%-wide bar would read as "the
+    // cohort bombed it" — the one finding on this card actually worth acting on —
+    // when the truth is the question has not been asked yet.
+    expect(screen.getByText(/not answered yet: sleep hygiene/i)).toBeInTheDocument();
+    expect(outcomeRows()).toHaveLength(2);
+  });
+
+  it("says nothing about unanswered tags when every tag has scores", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        outcomes: [
+          {
+            outcome_tag: "know-your-numbers",
+            mean_score: 0.84,
+            response_count: 200,
+            human_scored_count: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    expect(screen.queryByText(/not answered yet/i)).toBeNull();
+  });
+
+  it("distinguishes an outcome scored zero from one never answered", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        total_responses: 10,
+        mean_score: 0,
+        outcomes: [
+          {
+            outcome_tag: "know-your-numbers",
+            mean_score: 0,
+            response_count: 10,
+            human_scored_count: 0,
+          },
+          {
+            outcome_tag: "sleep-hygiene",
+            mean_score: null,
+            response_count: 0,
+            human_scored_count: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // The zero keeps its row and its bar — it is a real result, and the sliver the
+    // fill's min-width leaves says "measured, and they got it wrong". The null gets
+    // prose. Collapsing the two would hide the finding this card exists to surface.
+    expect(outcomeRows().map((li) => li.textContent)).toEqual(["Know your numbers0%"]);
+    expect(screen.getByText(/not answered yet: sleep hygiene/i)).toBeInTheDocument();
+  });
+
+  it("a challenge with no responses says so, not a row of zeroes", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        total_responses: 0,
+        mean_score: null,
+        outcomes: [
+          {
+            outcome_tag: "know-your-numbers",
+            mean_score: null,
+            response_count: 0,
+            human_scored_count: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByText(/no assessment responses yet/i);
+
+    // Not "Not answered yet: everything" either — with nothing answered anywhere,
+    // that list is the whole card and says less than one sentence does.
+    expect(
+      screen.queryByRole("list", { name: /mean score by learning outcome/i }),
+    ).toBeNull();
+    expect(screen.queryByText(/not answered yet/i)).toBeNull();
+    expect(screen.queryByText(/NaN/)).toBeNull();
+  });
+
+  it("tells an untagged challenge apart from an unanswered one", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({ total_responses: 0, mean_score: null, outcomes: [] }),
+    );
+
+    render(<Reports />);
+
+    // No items at all is an authoring gap (US-12), not an engagement one, and the
+    // admin's next move differs: tag some questions vs. wait for answers.
+    expect(
+      await screen.findByText(/no assessment items tagged to an outcome yet/i),
+    ).toBeInTheDocument();
+  });
+
+  it("counts one response as a response, not responses", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        total_responses: 1,
+        mean_score: 1,
+        outcomes: [
+          {
+            outcome_tag: "know-your-numbers",
+            mean_score: 1,
+            response_count: 1,
+            human_scored_count: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+
+    expect(await screen.findByText(/1 response · 100% average/i)).toBeInTheDocument();
+  });
+
+  it("reads an admin's tag back in their own words", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        outcomes: [
+          {
+            outcome_tag: "Sexual health",
+            mean_score: 0.79,
+            response_count: 200,
+            human_scored_count: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // A tag that is not kebab-case passes through rather than being mangled: the
+    // label function separates and capitalizes, it does not rewrite.
+    expect(outcomeRows().map((li) => li.textContent)).toEqual(["Sexual health79%"]);
+  });
+
+  it("includes human-overridden scores in the mean and says how many", async () => {
+    api.getLearningOutcomeReport.mockResolvedValue(
+      asOutcomes({
+        total_responses: 120,
+        mean_score: 0.84,
+        total_human_scored: 40,
+        outcomes: [
+          {
+            outcome_tag: "know-your-numbers",
+            mean_score: 0.84,
+            response_count: 120,
+            human_scored_count: 40,
+          },
+        ],
+      }),
+    );
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /mean score by learning outcome/i });
+
+    // US-24 scenario 2 at the surface: the overridden scores are inside the 84% and
+    // the 120, not filtered out of them — that is what "included in the totals"
+    // means. The count is named because a mean an admin partly set by hand reads
+    // differently from one the cohort earned, and 40 of 120 is that context.
+    expect(outcomeRows().map((li) => li.textContent)).toEqual(["Know your numbers84%"]);
+    expect(
+      screen.getByText(/120 responses · 84% average · 40 hand-scored/i),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about hand-scoring when nobody has overridden anything", async () => {
+    render(<Reports />);
+
+    // The default fixture's total_human_scored is 0. An admin who has never used
+    // US-19's override is owed no vocabulary for it, and "0 hand-scored" would be a
+    // permanent line that never earns its space.
+    expect(await screen.findByText(/200 responses · 82% average/i)).toBeInTheDocument();
+    expect(screen.queryByText(/hand-scored/i)).toBeNull();
+  });
+
+  it("refreshing picks up newly scored responses", async () => {
+    api.getLearningOutcomeReport
+      .mockResolvedValueOnce(asOutcomes())
+      .mockResolvedValue(
+        asOutcomes({
+          total_responses: 260,
+          mean_score: 0.86,
+          outcomes: [
+            {
+              outcome_tag: "know-your-numbers",
+              mean_score: 0.9,
+              response_count: 180,
+              human_scored_count: 0,
+            },
+            {
+              outcome_tag: "sleep-hygiene",
+              mean_score: null,
+              response_count: 0,
+              human_scored_count: 0,
+            },
+            {
+              outcome_tag: "stress-management",
+              mean_score: 0.79,
+              response_count: 80,
+              human_scored_count: 0,
+            },
+          ],
+        }),
+      );
+
+    render(<Reports />);
+    await screen.findByText(/200 responses · 82% average/i);
+
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    // Nothing is cached server-side, so a score earned a second ago is in the next
+    // refresh — the card just has to ask again.
+    expect(await screen.findByText(/260 responses · 86% average/i)).toBeInTheDocument();
+    expect(outcomeFills().map((el) => el.style.width)).toEqual(["90%", "79%"]);
+  });
+
+  it("is hidden when no challenge is published", async () => {
+    const notFound = new ApiError(404, "No active challenge");
+    api.getParticipationReport.mockRejectedValue(notFound);
+    api.getAttendanceReport.mockRejectedValue(notFound);
+    api.getEngagementReport.mockRejectedValue(notFound);
+    api.getLearningOutcomeReport.mockRejectedValue(notFound);
+
+    render(<Reports />);
+    await screen.findByText(/no published challenge yet/i);
+
+    expect(
+      screen.queryByRole("list", { name: /mean score by learning outcome/i }),
+    ).toBeNull();
+  });
+
+  it("a failed refresh keeps the outcomes already on screen", async () => {
+    api.getLearningOutcomeReport
+      .mockResolvedValueOnce(asOutcomes())
+      .mockRejectedValue(new ApiError(500, "boom"));
+
+    render(<Reports />);
+    await screen.findByText(/200 responses · 82% average/i);
+
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    // Stale numbers beat no numbers: the whole Promise.all failed, so every card
+    // keeps its last good read rather than blanking.
+    expect(screen.getByText(/200 responses · 82% average/i)).toBeInTheDocument();
+    expect(outcomeRows()).toHaveLength(2);
+  });
+});
+
+describe("Challenge selector (US-23 / FR-F3)", () => {
+  it("offers no selector when there is only one published challenge", async () => {
+    render(<Reports />);
+    await screen.findByRole("list", { name: /content views by type/i });
+
+    // The eyebrow already names it. A select with one option is a control that
+    // cannot do anything.
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("lists every published challenge once there is a choice", async () => {
+    api.listChallenges.mockResolvedValue(TWO_CHALLENGES);
+
+    render(<Reports />);
+
+    expect(
+      await screen.findByRole("option", { name: /spring 2026/i }),
+    ).toBeInTheDocument();
+    // "Active challenge" is the default: no challenge_id, so the dashboard keeps
+    // following the semester as it rolls over.
+    expect(selector()).toHaveValue("");
+    expect(screen.getByRole("option", { name: /active challenge/i })).toBeInTheDocument();
+  });
+
+  it("never offers a draft, which the server will not report on", async () => {
+    api.listChallenges.mockResolvedValue([
+      ...TWO_CHALLENGES,
+      { ...asChallenge(3, "Fall 2027"), status: "draft" },
+    ]);
+
+    render(<Reports />);
+    await screen.findByRole("option", { name: /spring 2026/i });
+
+    // Offering one would build a control that 404s the screen.
+    expect(screen.queryByRole("option", { name: /fall 2027/i })).toBeNull();
+  });
+
+  it("asks for no challenge id until one is chosen", async () => {
+    api.listChallenges.mockResolvedValue(TWO_CHALLENGES);
+
+    render(<Reports />);
+    await screen.findByRole("list", { name: /content views by type/i });
+
+    // undefined, not null or 0: the api layer omits the parameter entirely, which
+    // is what makes the server resolve the active challenge.
+    expect(api.getEngagementReport).toHaveBeenCalledWith(undefined);
+  });
+
+  it("moves all four cards to the challenge chosen", async () => {
+    api.listChallenges.mockResolvedValue(TWO_CHALLENGES);
+
+    render(<Reports />);
+    await screen.findByRole("option", { name: /spring 2026/i });
+    await userEvent.selectOptions(selector(), "2");
+
+    // The whole point of one selector rather than four: the cards can never end
+    // up describing different semesters.
+    expect(api.getParticipationReport).toHaveBeenLastCalledWith(2);
+    expect(api.getAttendanceReport).toHaveBeenLastCalledWith(2);
+    expect(api.getEngagementReport).toHaveBeenLastCalledWith(2);
+    expect(api.getLearningOutcomeReport).toHaveBeenLastCalledWith(2);
+  });
+
+  it("shows the chosen challenge's numbers", async () => {
+    api.listChallenges.mockResolvedValue(TWO_CHALLENGES);
+    api.getEngagementReport
+      .mockResolvedValueOnce(asEngagement())
+      .mockResolvedValue(
+        asEngagement({
+          total_content_views: 12,
+          content_views: [
+            { content_ref: "week_detail", count: 9 },
+            { content_ref: "tip", count: 3 },
+          ],
+        }),
+      );
+
+    render(<Reports />);
+    await screen.findByText(/150 content views in total/i);
+
+    await userEvent.selectOptions(selector(), "2");
+
+    expect(await screen.findByText(/12 content views in total/i)).toBeInTheDocument();
+  });
+
+  it("exports the prize list for the challenge on screen, not the active one", async () => {
+    api.listChallenges.mockResolvedValue(TWO_CHALLENGES);
+    api.exportPrizeCsv.mockResolvedValue({
+      blob: new Blob(["student_id,sso_subject\n"], { type: "text/csv" }),
+      filename: "prize-eligible-Spring-2026-2.csv",
+    });
+    captureDownload();
+
+    render(<Reports />);
+    await screen.findByRole("option", { name: /spring 2026/i });
+    await userEvent.selectOptions(selector(), "2");
+    await userEvent.click(screen.getByRole("button", { name: /export prize/i }));
+
+    // A drawing run against the wrong semester has real prizes attached.
+    expect(api.exportPrizeCsv).toHaveBeenCalledWith(2);
+  });
+
+  it("keeps the dashboard when the challenge list fails to load", async () => {
+    api.listChallenges.mockRejectedValue(new ApiError(500, "Server exploded"));
+
+    render(<Reports />);
+
+    // The list is the control's own data, not part of the moment the cards
+    // describe. Losing it costs the selector, not the report.
+    expect(await screen.findByText(/150 content views in total/i)).toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});

@@ -21,11 +21,36 @@ dependencies = [
 # Real SAML integration. Pulls native xmlsec/libxmlsec1 — installed ONLY when the
 # real campus IdP is wired (AUTH_PROVIDER=saml). The mock path never needs this.
 saml = ["python3-saml>=1.16"]
-dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.6"]
+dev = ["pytest>=8.0", "pytest-bdd>=7.2", "httpx>=0.27", "ruff>=0.6"]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[tool.pytest.ini_options]
+# Gherkin tags become pytest markers via the pytest_bdd_apply_tag hook in
+# tests/conftest.py, which rewrites "-"/":"/"." to "_" so `-m` can select them.
+markers = [
+    "FR_B6: duplicate a prior challenge",
+    "FR_D6: manual completion override + audit",
+    "FR_E3: guide guardrails — no medical advice, grounded, crisis routing",
+    "FR_E4: MCQ auto-scoring against the answer key",
+    "FR_E5: reflection scoring against a rubric + human override",
+    "FR_F1: participation & completion funnel report",
+    "FR_F2: auto-vs-manual attendance report",
+    "FR_F3: engagement report — content views + guide usage",
+    "FR_F4: learning-outcome aggregate — mean score by outcome tag",
+    "FR_F5: prize-eligible CSV export",
+    "NFR_8: AI safety — hard-coded crisis routing, never model discretion",
+    "ai: exercises the reflection scoring seam (stubbed — no model on this branch)",
+    "ai_safety: the guardrails in front of the guide seam (stubbed — no model on this branch)",
+    "audit: writes or asserts the audit trail",
+    "source_UC_5: traces to use case UC-5",
+    "source_UC_7: traces to use case UC-7",
+    "source_UC_8: traces to use case UC-8",
+    "source_UC_10: traces to use case UC-10",
+    "source_UC_11: traces to use case UC-11",
+]
 
 [tool.ruff]
 target-version = "py39"

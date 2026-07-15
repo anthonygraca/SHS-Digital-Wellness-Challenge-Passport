@@ -2,6 +2,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { manifest } from "./src/pwa/manifest";
 
 // Dev server proxies the API paths to FastAPI so the session cookie stays
 // same-origin (no CORS / SameSite friction). In production the SPA and API are
@@ -11,14 +12,28 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      manifest: {
-        name: "SHS Wellness Passport",
-        short_name: "Passport",
-        start_url: "/",
-        display: "standalone",
-        background_color: "#12100f",
-        theme_color: "#ff4438",
-        icons: [],
+      manifest,
+      workbox: {
+        // Workbox serves the precached index.html for ANY navigation it handles.
+        // /auth/login is not a fetch — it is a top-level browser redirect into the
+        // SAML IdP (see auth.ts startLogin), and /mock-idp is the IdP's own page.
+        // Answer either with the SPA shell and sign-in silently dies. This never bit
+        // us before only because the manifest had no icons, so the app never
+        // installed and the service worker never went live; shipping icons without
+        // this denylist is what would have broken it. /api and /enrollment are
+        // cors-mode fetches and were never at risk — they are listed to keep the
+        // rule "the SW owns the SPA's routes and nothing else" readable in one place.
+        //
+        // This also denylists /auth/callback, which IS a client-side route. That is
+        // correct: the SAML callback is inherently online-only, so passing it to the
+        // network matches today's behaviour exactly (prod serves index.html for it;
+        // dev has the explicit proxy bypass below).
+        navigateFallbackDenylist: [
+          /^\/auth\//,
+          /^\/api\//,
+          /^\/mock-idp\//,
+          /^\/enrollment\//,
+        ],
       },
     }),
   ],

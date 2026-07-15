@@ -1,13 +1,29 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useSession } from "../../auth/SessionProvider";
+import { isAdminSession } from "../../auth/roles";
+import { ApiError } from "../../api/challenges";
 import { EligibilityBlocked } from "../EligibilityBlocked/EligibilityBlocked";
-import { fetchPassport } from "../../passport/passport";
-import { checkIn as checkInApi } from "../../api/checkins";
-import type { Passport as PassportData, WeekStatus } from "../../types/passport";
-import type { CheckInResponse } from "../../types/checkin";
-import { TipNotification } from "../TipNotification/TipNotification";
+import { OfflineBanner } from "../OfflineBanner/OfflineBanner";
+import { readPassportSnapshot, writePassportSnapshot } from "../../offline/snapshot";
+import { useOnlineStatus } from "../../offline/useOnlineStatus";
+import {
+  checkIn,
+  fetchPassport,
+  recordContentView,
+  scanCheckIn,
+} from "../../passport/passport";
+import type {
+  CheckInResult,
+  Passport as PassportData,
+  WeekStatus,
+} from "../../types/passport";
+import { useTheme } from "../../theme/ThemeProvider";
+import { resolveThemeCopy } from "../../theme/themes";
+import CrisisResources from "../CrisisResources/CrisisResources";
 import { BoltIcon, CheckCircleIcon, LockIcon, TrophyIcon } from "../icons";
+import { KnowledgeCheck } from "./KnowledgeCheck";
+import { QrScanner } from "./QrScanner";
 import styles from "./Passport.module.css";
 
 const STATUS_LABEL: Record<WeekStatus, string> = {
@@ -42,21 +58,92 @@ function formatWindow(
   return start ?? end ?? "Dates TBA";
 }
 
+/**
+ * Prize-eligibility indicator (US-7 / FR-C5). Eligibility is derived server-side
+ * from required-task completion; this just renders the status and the progress
+ * toward it so a student knows if they have met the drawing requirements.
+ */
+function PrizeIndicator({
+  eligible,
+  requiredCompleted,
+  requiredTotal,
+}: {
+  eligible: boolean;
+  requiredCompleted: number;
+  requiredTotal: number;
+}) {
+  const noun = `required task${requiredTotal === 1 ? "" : "s"}`;
+  const status = eligible ? "Prize eligible" : "Not yet eligible";
+  const detail = eligible
+    ? `All ${requiredTotal} ${noun} complete — you're in the drawing`
+    : `${requiredCompleted} of ${requiredTotal} ${noun} complete`;
+  return (
+    <div
+      className={styles.prize}
+      data-eligible={eligible}
+      role="status"
+      aria-label={`Prize eligibility: ${status}. ${detail}.`}
+    >
+      <span className={styles.prizeIcon} aria-hidden="true">
+        {eligible ? <TrophyIcon size={20} /> : <LockIcon size={18} />}
+      </span>
+      <span className={styles.prizeText}>
+        <span className={styles.prizeStatus}>{status}</span>
+        <span className={styles.prizeDetail}>{detail}</span>
+      </span>
+    </div>
+  );
+}
+
 type OnCheckIn = (weekNo: number) => Promise<void> | void;
+type OnScan = (token: string) => Promise<CheckInResult>;
 
 /** Presentational passport: progress countdown, week tiles, and a detail sheet. */
 export function PassportView({
   passport,
   onCheckIn,
-  onCloseSheet,
+  onScan,
+  online = true,
+  stale = false,
 }: {
   passport: PassportData;
   onCheckIn?: OnCheckIn;
-  onCloseSheet?: () => void;
+  onScan?: OnScan;
+  /** Drives the offline banner and the refusal to start a network action (US-6). */
+  online?: boolean;
+  /** Whether `passport` came from the offline cache rather than a live fetch. */
+  stale?: boolean;
 }) {
-  const { challengeName, completedWeeks, totalWeeks, remainingWeeks, weeks } =
-    passport;
+  const {
+    challengeName,
+    theme: themeId,
+    themeConfig: theme,
+    completedWeeks,
+    totalWeeks,
+    remainingWeeks,
+    requiredCompleted,
+    requiredTotal,
+    prizeEligible,
+    weeks,
+  } = passport;
   const pct = totalWeeks > 0 ? (completedWeeks / totalWeeks) * 100 : 0;
+
+  // Themed branding and copy (US-13), read straight off the passport. The palette
+  // is applied separately by ThemeProvider as CSS custom properties, so every
+  // style below keeps working through a re-skin untouched.
+  const { appTitle, tagline } = resolveThemeCopy(themeId, theme);
+  // Hero art sits behind a scrim of the theme's own surface color, so the header
+  // text keeps the contrast it was designed for whatever image an admin picks
+  // (and whether the theme is light or dark). No art = the plain surface.
+  const heroStyle = theme?.heroUrl
+    ? {
+        backgroundImage:
+          `linear-gradient(160deg, color-mix(in srgb, var(--wp-surface) 80%, transparent), ` +
+          `color-mix(in srgb, var(--wp-surface) 94%, transparent)), url(${theme.heroUrl})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }
+    : undefined;
 
   const [selectedWeekNo, setSelectedWeekNo] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -64,6 +151,13 @@ export function PassportView({
     selectedWeekNo != null
       ? (weeks.find((w) => w.weekNo === selectedWeekNo) ?? null)
       : null;
+
+  // Event-QR scan flow (US-8): scanner overlay, then a success (tip) or error sheet.
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanResult, setScanResult] = useState<CheckInResult | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+  // Why an action was refused offline (US-6 / FR-C4), null when nothing was refused.
+  const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
 
   // Escape closes the detail sheet.
   useEffect(() => {
@@ -75,26 +169,91 @@ export function PassportView({
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedWeek]);
 
+  /**
+   * Open a week's detail sheet, and record that the student read it (FR-F3 / US-23).
+   *
+   * In the click handler rather than an effect on `selectedWeekNo`, deliberately.
+   * An effect would fire twice per open under StrictMode's double-invoke and
+   * inflate every count in the engagement report; a click happens once because a
+   * student clicked once. It would also re-fire on any re-render that re-ran the
+   * effect, which is a re-render, not a read.
+   *
+   * Not awaited: the sheet is already open by the time the request lands, and
+   * recordContentView swallows its own failures. Telemetry does not get to make a
+   * student wait, or fail.
+   */
+  function openWeek(weekNo: number) {
+    setSelectedWeekNo(weekNo);
+    void recordContentView(weekNo, "week_detail");
+  }
+
   async function handleCheckIn() {
     if (!onCheckIn || selectedWeek == null) return;
+    if (!online) {
+      // Returns before setSubmitting and before awaiting onCheckIn, so there is no
+      // request, no optimistic state, and nothing queued to replay — the week keeps
+      // the status the server last gave it.
+      setOfflineNotice(
+        "Checking in needs a connection. Nothing was recorded — reconnect and try again.",
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       await onCheckIn(selectedWeek.weekNo);
-      // Close the detail sheet after successful check-in so TipNotification is visible
+      // Close the detail sheet after successful check-in
       setSelectedWeekNo(null);
-      onCloseSheet?.();
     } finally {
       setSubmitting(false);
     }
   }
 
+  function openScanner() {
+    if (!online) {
+      // The scanner never mounts, so the camera never starts and onScan is
+      // unreachable. Nothing to queue: the server checks each token's freshness, so
+      // a scan replayed later would be rejected anyway — after we had already told
+      // the student they were checked in. Refusing now is the only honest answer.
+      setOfflineNotice(
+        "Scanning a QR code needs a connection. Nothing was recorded — reconnect and try again.",
+      );
+      return;
+    }
+    setScanResult(null);
+    setScanError(null);
+    setScannerOpen(true);
+  }
+
+  async function handleDecode(token: string) {
+    if (!onScan) return;
+    setScannerOpen(false);
+    try {
+      const result = await onScan(token);
+      setScanResult(result);
+      setScanError(null);
+    } catch (e) {
+      setScanError(
+        e instanceof ApiError ? e.message : "Check-in failed. Please try again.",
+      );
+      setScanResult(null);
+    }
+  }
+
   return (
     <main className={styles.screen}>
-      <header className={styles.header}>
+      <OfflineBanner online={online} stale={stale} />
+      <header className={styles.header} style={heroStyle}>
+        <div className={styles.brand}>
+          {theme?.logoUrl && (
+            <img className={styles.logo} src={theme.logoUrl} alt="" />
+          )}
+          <span className={styles.appTitle}>{appTitle}</span>
+        </div>
         <p className={styles.eyebrow}>{challengeName}</p>
         <h1 className={styles.countdown}>
           {completedWeeks} of {totalWeeks} complete, {remainingWeeks} remaining
         </h1>
+        {tagline && <p className={styles.tagline}>{tagline}</p>}
         <div
           className={styles.progressTrack}
           role="progressbar"
@@ -105,6 +264,20 @@ export function PassportView({
         >
           <div className={styles.progressFill} style={{ width: `${pct}%` }} />
         </div>
+        <PrizeIndicator
+          eligible={prizeEligible}
+          requiredCompleted={requiredCompleted}
+          requiredTotal={requiredTotal}
+        />
+        {onScan && (
+          <button
+            type="button"
+            className={styles.scanCta}
+            onClick={openScanner}
+          >
+            <BoltIcon size={18} /> Scan QR to check in
+          </button>
+        )}
       </header>
 
       <ul className={styles.grid}>
@@ -113,7 +286,7 @@ export function PassportView({
             <button
               type="button"
               className={`${styles.tile} ${styles[week.status]}`}
-              onClick={() => setSelectedWeekNo(week.weekNo)}
+              onClick={() => openWeek(week.weekNo)}
               aria-label={`Week ${week.weekNo}: ${week.title}, ${STATUS_LABEL[week.status]}`}
             >
               <div className={styles.tileTop}>
@@ -175,6 +348,12 @@ export function PassportView({
               </div>
             </dl>
 
+            {/* Renders nothing when the week has no questions, which is most weeks.
+                Deliberately does not gate the check-in below: FR-E4 says nothing about
+                coupling them, and doing so would change the UC-3 core loop. Offline it
+                refuses to submit rather than queueing, same as check-in (US-6). */}
+            <KnowledgeCheck weekNo={selectedWeek.weekNo} online={online} />
+
             {selectedWeek.status === "complete" ? (
               <button type="button" className={styles.checkedIn} disabled>
                 <CheckCircleIcon size={18} /> Checked in
@@ -192,12 +371,89 @@ export function PassportView({
           </div>
         </div>
       )}
+
+      {scannerOpen && onScan && (
+        <QrScanner
+          onDecode={(token) => void handleDecode(token)}
+          onClose={() => setScannerOpen(false)}
+        />
+      )}
+
+      {offlineNotice && (
+        <div className={styles.backdrop} onClick={() => setOfflineNotice(null)}>
+          <div
+            className={styles.sheet}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Connection required"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.sheetHandle} aria-hidden="true" />
+            <button
+              type="button"
+              className={styles.close}
+              onClick={() => setOfflineNotice(null)}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+
+            <h2 className={styles.sheetTitle}>You're offline</h2>
+            <p className={styles.sheetCaption} role="alert">
+              {offlineNotice}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {(scanResult || scanError) && (
+        <div className={styles.backdrop} onClick={() => { setScanResult(null); setScanError(null); }}>
+          <div
+            className={styles.sheet}
+            role="dialog"
+            aria-modal="true"
+            aria-label={scanResult ? "Check-in complete" : "Check-in failed"}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.sheetHandle} aria-hidden="true" />
+            <button
+              type="button"
+              className={styles.close}
+              onClick={() => { setScanResult(null); setScanError(null); }}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+
+            {scanResult ? (
+              <>
+                <p className={styles.eyebrow}>Week {scanResult.weekNo}</p>
+                <h2 className={styles.sheetTitle}>
+                  <CheckCircleIcon size={22} /> {scanResult.title} complete!
+                </h2>
+                <p className={styles.tip} role="status">
+                  {scanResult.tip}
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 className={styles.sheetTitle}>Couldn't check in</h2>
+                <p className={styles.sheetCaption} role="alert">
+                  {scanError}
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
 interface PassportProps {
   fetchData?: () => Promise<PassportData | null>;
+  checkInFn?: (weekNo: number) => Promise<PassportData | null>;
+  scanCheckInFn?: (token: string) => Promise<CheckInResult>;
 }
 
 /**
@@ -210,86 +466,88 @@ interface PassportProps {
  */
 export function Passport({
   fetchData = fetchPassport,
+  checkInFn = checkIn,
+  scanCheckInFn = scanCheckIn,
 }: PassportProps) {
   const { session, loading, signOut } = useSession();
   const [passport, setPassport] = useState<PassportData | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
-  const [checkInResponse, setCheckInResponse] = useState<CheckInResponse | null>(null);
+  // Whether what we are showing came from the cache rather than this load's fetch.
+  const [stale, setStale] = useState(false);
+  const online = useOnlineStatus();
+  const { applyTheme } = useTheme();
 
   useEffect(() => {
     if (!session || !session.isCurrentStudent) return;
     let active = true;
-    void fetchData().then((data) => {
-      if (!active) return;
-      setPassport(data);
-      setDataLoading(false);
-    });
+    void (async () => {
+      try {
+        const data = await fetchData();
+        if (!active) return;
+        // Only a successful fetch writes, and nothing here ever clears: a null is
+        // any !res.ok, including a transient 500, and throwing away a good snapshot
+        // over a blip would cost the student their offline passport. The signed-out
+        // case is already handled where it belongs, in SessionProvider.
+        if (data) writePassportSnapshot(data);
+        setPassport(data);
+        setStale(false);
+      } catch {
+        // Offline: fetch rejects instead of resolving !res.ok, so fetchPassport's
+        // null-on-failure guard never runs. Left uncaught this strands the screen
+        // on "Loading your passport…" permanently. A rejected fetch — not
+        // navigator.onLine — is what proves the data on screen is not live.
+        if (!active) return;
+        const cached = readPassportSnapshot();
+        setPassport(cached);
+        setStale(cached != null);
+      } finally {
+        // active-guarded: finally still runs when the effect was torn down
+        // mid-flight, and setting state after unmount is a no-op worth avoiding.
+        if (active) setDataLoading(false);
+      }
+    })();
     return () => {
       active = false;
     };
   }, [session, fetchData]);
 
+  // The challenge's theme rides along on every passport response, so re-skinning
+  // on a theme change (US-13) costs nothing but this hand-off — and a check-in or
+  // scan refresh re-applies it for free.
+  useEffect(() => {
+    if (passport) applyTheme(passport.theme, passport.themeConfig);
+  }, [passport, applyTheme]);
+
   async function handleCheckIn(weekNo: number) {
     try {
-      // Use weekNo to match the API schema
-      const response = await checkInApi({ weekNo, method: "manual" } as any);
-      
-      // The old API returns PassportOut, not CheckInResponse with tips
-      // We need to generate a tip on the frontend for now
-      setCheckInResponse({
-        checkin_id: Date.now(),
-        task_title: `Week ${weekNo} Task`,
-        checked_in_at: new Date().toISOString(),
-        personalized_tip: {
-          tip: "Great job completing this wellness activity! You're building healthy habits that will serve you throughout college and beyond.",
-          resource: "Visit Student Health Services for personalized wellness guidance and campus resources.",
-          next_step: "Check your passport to see your progress and plan your next wellness activity."
-        },
-        progress: {
-          completed_tasks: response.completedWeeks || 0,
-          total_tasks: response.totalWeeks || 0,
-          required_tasks: response.totalWeeks || 0,
-          remaining_required_tasks: (response.totalWeeks || 0) - (response.completedWeeks || 0),
-          is_prize_eligible: false
-        }
-      } as any);
-      
-      // Refresh passport data to update the UI
-      const updatedPassport = await fetchData();
+      // checkInFn now returns the updated passport with tip in the response
+      const updatedPassport = await checkInFn(weekNo);
       if (updatedPassport) {
         setPassport(updatedPassport);
+        writePassportSnapshot(updatedPassport);
       }
     } catch (error: any) {
       console.error("Check-in failed:", error);
-      
-      const errorMessage = error?.message || "An unexpected error occurred";
-      
-      setCheckInResponse({
-        checkin_id: 0,
-        task_title: "Check-in Error",
-        checked_in_at: new Date().toISOString(),
-        personalized_tip: {
-          tip: `Unable to complete check-in: ${errorMessage}`,
-          resource: "Please try again or contact support if the issue persists.",
-          next_step: "Check your internet connection and try again."
-        },
-        progress: {
-          completed_tasks: 0,
-          total_tasks: 0,
-          required_tasks: 0,
-          remaining_required_tasks: 0,
-          is_prize_eligible: false
-        }
-      });
+      // Error handling - let it propagate or show a message
+      throw error;
     }
   }
 
-  function handleCloseTip() {
-    setCheckInResponse(null);
+  // Scan flow: record the check-in, refresh progress, and let the view surface the
+  // tip. Errors (duplicate / invalid token) propagate for the view to display.
+  async function handleScan(token: string): Promise<CheckInResult> {
+    const result = await scanCheckInFn(token);
+    setPassport(result.passport);
+    return result;
   }
 
   if (loading) return <div className={styles.center}>Loading…</div>;
   if (!session) return <Navigate to="/" replace />;
+  // The manifest's start_url is /passport, so this is where an installed app opens —
+  // including for staff. Without this they would land on "not eligible to join",
+  // which roles.ts already calls the wrong answer for an admin. Only admins leave,
+  // so this cannot bounce against the landing's mirror-image redirect.
+  if (isAdminSession(session)) return <Navigate to="/admin" replace />;
   if (!session.isCurrentStudent) return <EligibilityBlocked />;
 
   return (
@@ -297,16 +555,35 @@ export function Passport({
       {dataLoading ? (
         <div className={styles.center}>Loading your passport…</div>
       ) : passport ? (
-        <PassportView passport={passport} onCheckIn={handleCheckIn} />
+        <PassportView
+          passport={passport}
+          onCheckIn={handleCheckIn}
+          onScan={handleScan}
+          online={online}
+          stale={stale}
+        />
+      ) : !online ? (
+        // Offline with nothing cached. The branch below would say "no active
+        // challenge yet", which we have no way of knowing and is probably false —
+        // we never reached the server to ask.
+        <div className={styles.center} role="status">
+          You're offline and haven't synced your passport yet. Reconnect to load
+          your progress.
+        </div>
       ) : (
         <div className={styles.center}>
           No active challenge yet — check back soon.
         </div>
       )}
-      {checkInResponse && (
-        <TipNotification checkInData={checkInResponse} onClose={handleCloseTip} />
-      )}
+      {/*
+        Outside every conditional above, so the crisis affordance is on screen in each
+        state this route can be in — loaded, loading, offline with nothing cached, and
+        "no active challenge yet". A student in crisis at a campus that has published
+        nothing is exactly the student the last branch strands, and FR-E3 does not depend
+        on a challenge existing any more than the API route does.
+      */}
       <div className={styles.signoutBar}>
+        <CrisisResources />
         <button
           type="button"
           className={styles.signout}

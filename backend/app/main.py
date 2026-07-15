@@ -5,7 +5,18 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.db import init_db
-from app.routers import admin, auth, challenges, checkins, enrollment, passport
+from app.routers import (
+    admin,
+    assessments,
+    auth,
+    challenges,
+    checkins,
+    enrollment,
+    guide,
+    passport,
+    reports,
+    themes,
+)
 
 
 @asynccontextmanager
@@ -21,6 +32,10 @@ app.include_router(enrollment.router)
 app.include_router(challenges.router)
 app.include_router(passport.router)
 app.include_router(checkins.router)
+app.include_router(assessments.router)
+app.include_router(reports.router)
+app.include_router(themes.router)
+app.include_router(guide.router)
 
 
 @app.get("/healthz")

@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useSession } from "../../../auth/SessionProvider";
 import * as api from "../../../api/challenges";
-import type { Challenge, ChallengeSummary, Task } from "../../../types/challenge";
+import * as themeApi from "../../../api/themes";
+import type {
+  AssessmentItem,
+  AssessmentResponse,
+  Challenge,
+  ChallengeSummary,
+  CheckIn,
+  CheckInAudit,
+  Task,
+} from "../../../types/challenge";
+import type { Theme } from "../../../types/theme";
 import styles from "./ChallengeBuilder.module.css";
 
 // ---------------------------------------------------------------------------
@@ -39,6 +50,7 @@ function ChallengeList({
   const [challenges, setChallenges] = useState<ChallengeSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [duplicating, setDuplicating] = useState<ChallengeSummary | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,23 +82,35 @@ function ChallengeList({
         <p className={styles.empty}>No challenges yet — create the first one.</p>
       )}
 
+      {/* The open affordance and the actions are siblings, not nested: a button
+          inside a role="button" is invalid, and its clicks would bubble to onOpen. */}
       {challenges.map((c) => (
-        <div
-          key={c.id}
-          role="button"
-          tabIndex={0}
-          className={styles.challengeCard}
-          onClick={() => onOpen(c.id)}
-          onKeyDown={(e) => e.key === "Enter" && onOpen(c.id)}
-          aria-label={`Open ${c.name}`}
-        >
-          <div className={styles.challengeCardInfo}>
-            <h3>{c.name}</h3>
-            <p>
-              {c.semester} · {fmtDate(c.start_date)} – {fmtDate(c.end_date)}
-            </p>
+        <div key={c.id} className={styles.challengeCardWrap}>
+          <div
+            role="button"
+            tabIndex={0}
+            className={styles.challengeCard}
+            onClick={() => onOpen(c.id)}
+            onKeyDown={(e) => e.key === "Enter" && onOpen(c.id)}
+            aria-label={`Open ${c.name}`}
+          >
+            <div className={styles.challengeCardInfo}>
+              <h3>{c.name}</h3>
+              <p>
+                {c.semester} · {fmtDate(c.start_date)} – {fmtDate(c.end_date)}
+              </p>
+            </div>
+            <StatusBadge status={c.status} />
           </div>
-          <StatusBadge status={c.status} />
+          <div className={styles.challengeCardActions}>
+            <button
+              type="button"
+              className={`${styles.btnSecondary} ${styles.cardAction}`}
+              onClick={() => setDuplicating(c)}
+            >
+              Duplicate
+            </button>
+          </div>
         </div>
       ))}
 
@@ -94,6 +118,14 @@ function ChallengeList({
         <ChallengeFormModal
           onClose={() => setShowForm(false)}
           onSaved={(c) => { setShowForm(false); onCreated(c.id); }}
+        />
+      )}
+
+      {duplicating && (
+        <DuplicateChallengeModal
+          challenge={duplicating}
+          onClose={() => setDuplicating(null)}
+          onDuplicated={(c) => { setDuplicating(null); onCreated(c.id); }}
         />
       )}
     </>
@@ -107,15 +139,23 @@ function ChallengeList({
 function ChallengeDetail({
   id,
   onBack,
+  onDuplicated,
 }: {
   id: number;
   onBack: () => void;
+  onDuplicated: (id: number) => void;
 }) {
+  const navigate = useNavigate();
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [loading, setLoading] = useState(true);
   const [editChallenge, setEditChallenge] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [itemsTask, setItemsTask] = useState<Task | null>(null);
+  const [checkinsTask, setCheckinsTask] = useState<Task | null>(null);
+  const [editingTheme, setEditingTheme] = useState(false);
+  const [themes, setThemes] = useState<Theme[]>([]);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -129,6 +169,17 @@ function ChallengeDetail({
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Only for naming the applied theme; a failed lookup falls back to its id.
+  const refreshThemes = useCallback(
+    () => themeApi.listThemes().then(setThemes).catch(() => setThemes([])),
+    [],
+  );
+
+  useEffect(() => { void refreshThemes(); }, [refreshThemes]);
+
+  const themeName =
+    themes.find((t) => t.id === challenge?.theme_id)?.name ?? challenge?.theme_id;
 
   async function handlePublish() {
     if (!challenge) return;
@@ -171,6 +222,9 @@ function ChallengeDetail({
             <span>{challenge.semester}</span>
             <span>{fmtDate(challenge.start_date)} – {fmtDate(challenge.end_date)}</span>
             <StatusBadge status={challenge.status} />
+            <span className={styles.themeBadge}>
+              Theme: {challenge.theme_id ? themeName : "Default"}
+            </span>
           </div>
           {error && <p className={styles.error}>{error}</p>}
           <div className={styles.detailActions}>
@@ -180,6 +234,22 @@ function ChallengeDetail({
               onClick={() => setEditChallenge(true)}
             >
               Edit details
+            </button>
+            {challenge.theme_id && (
+              <button
+                type="button"
+                className={styles.btnSecondary}
+                onClick={() => setEditingTheme(true)}
+              >
+                Edit theme
+              </button>
+            )}
+            <button
+              type="button"
+              className={styles.btnSecondary}
+              onClick={() => setDuplicating(true)}
+            >
+              Duplicate
             </button>
             {challenge.status === "draft" && (
               <button
@@ -203,6 +273,9 @@ function ChallengeDetail({
           onEdit={setEditingTask}
           onDelete={(taskId) => void handleDeleteTask(taskId)}
           onReorder={handleReorder}
+          onManageItems={setItemsTask}
+          onManageCheckins={setCheckinsTask}
+          onLive={(t) => navigate(`/admin/live/${challenge.id}/${t.id}`)}
         />
 
         <button
@@ -239,6 +312,38 @@ function ChallengeDetail({
           onSaved={() => { setEditingTask(null); void load(); }}
         />
       )}
+
+      {itemsTask && (
+        <AssessmentItemsPanel
+          challengeId={challenge.id}
+          task={itemsTask}
+          onClose={() => { setItemsTask(null); void load(); }}
+        />
+      )}
+
+      {checkinsTask && (
+        <CompletionOverridePanel
+          challengeId={challenge.id}
+          task={checkinsTask}
+          onClose={() => setCheckinsTask(null)}
+        />
+      )}
+
+      {editingTheme && challenge.theme_id && (
+        <ThemeEditorModal
+          themeId={challenge.theme_id}
+          onClose={() => setEditingTheme(false)}
+          onSaved={() => { setEditingTheme(false); void refreshThemes(); }}
+        />
+      )}
+
+      {duplicating && (
+        <DuplicateChallengeModal
+          challenge={challenge}
+          onClose={() => setDuplicating(false)}
+          onDuplicated={(c) => { setDuplicating(false); onDuplicated(c.id); }}
+        />
+      )}
     </>
   );
 }
@@ -252,11 +357,17 @@ function TaskList({
   onEdit,
   onDelete,
   onReorder,
+  onManageItems,
+  onManageCheckins,
+  onLive,
 }: {
   tasks: Task[];
   onEdit: (t: Task) => void;
   onDelete: (id: number) => void;
   onReorder: (ids: number[]) => Promise<void>;
+  onManageItems: (t: Task) => void;
+  onManageCheckins: (t: Task) => void;
+  onLive: (t: Task) => void;
 }) {
   const dragSrc = useRef<number | null>(null); // index being dragged
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
@@ -343,9 +454,34 @@ function TaskList({
                 {task.caption}
               </p>
             )}
+
           </div>
 
           <div className={styles.taskActions}>
+            <button
+              type="button"
+              className={styles.btnGhost}
+              onClick={() => onLive(task)}
+              aria-label={`Open the live event dashboard for ${task.title}`}
+            >
+              Live
+            </button>
+            <button
+              type="button"
+              className={styles.btnGhost}
+              onClick={() => onManageItems(task)}
+              aria-label={`Assessment items for ${task.title}`}
+            >
+              Items ({task.assessment_items?.length ?? 0})
+            </button>
+            <button
+              type="button"
+              className={styles.btnGhost}
+              onClick={() => onManageCheckins(task)}
+              aria-label={`Manage check-ins for ${task.title}`}
+            >
+              Check-ins
+            </button>
             <button
               type="button"
               className={styles.btnGhost}
@@ -370,6 +506,173 @@ function TaskList({
 }
 
 // ---------------------------------------------------------------------------
+// Theme editor modal (US-13 / FR-B4)
+// ---------------------------------------------------------------------------
+
+// The palette holds ~20 tokens; these are the ones worth a color picker. The rest
+// (the on-* contrast pairs especially) stay as authored and remain editable via
+// the API, so tuning them is still config rather than code (NFR-6).
+const EDITABLE_COLORS: { key: string; label: string }[] = [
+  { key: "primary", label: "Primary" },
+  { key: "secondary", label: "Secondary" },
+  { key: "hero-a", label: "Hero top" },
+  { key: "hero-b", label: "Hero bottom" },
+];
+
+function ThemeEditorModal({
+  themeId,
+  onClose,
+  onSaved,
+}: {
+  themeId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [theme, setTheme] = useState<Theme | null>(null);
+  const [colors, setColors] = useState<Record<string, string>>({});
+  const [appTitle, setAppTitle] = useState("");
+  const [tagline, setTagline] = useState("");
+  const [copyTone, setCopyTone] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [heroUrl, setHeroUrl] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    void themeApi
+      .getTheme(themeId)
+      .then((t) => {
+        setTheme(t);
+        setColors(
+          Object.fromEntries(
+            EDITABLE_COLORS.map(({ key }) => [key, t.palette[key] ?? "#000000"]),
+          ),
+        );
+        setAppTitle(t.app_title);
+        setTagline(t.tagline);
+        setCopyTone(t.copy_tone);
+        setLogoUrl(t.logo_url ?? "");
+        setHeroUrl(t.hero_url ?? "");
+      })
+      .catch((e) =>
+        setError(e instanceof api.ApiError ? e.message : "Could not load theme"),
+      );
+  }, [themeId]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!theme) return;
+    setError(null);
+    setSaving(true);
+    try {
+      // Merge into the fetched palette: the API replaces the map wholesale, so
+      // sending only the edited keys would drop every token not shown here.
+      await themeApi.updateTheme(theme.id, {
+        palette: { ...theme.palette, ...colors },
+        app_title: appTitle,
+        tagline,
+        copy_tone: copyTone,
+        logo_url: logoUrl || null,
+        hero_url: heroUrl || null,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Theme editor">
+      <div className={`${styles.modal} ${styles.modalWide}`}>
+        <h2>Edit theme{theme ? `: ${theme.name}` : ""}</h2>
+        {error && <p className={styles.error}>{error}</p>}
+        {!theme ? (
+          <p className={styles.empty}>Loading…</p>
+        ) : (
+          <form onSubmit={(e) => void handleSubmit(e)}>
+            <div className={styles.colorGrid}>
+              {EDITABLE_COLORS.map(({ key, label }) => (
+                <div key={key} className={styles.colorField}>
+                  <label htmlFor={`te-${key}`}>{label}</label>
+                  <input
+                    id={`te-${key}`}
+                    type="color"
+                    value={colors[key] ?? "#000000"}
+                    onChange={(e) =>
+                      setColors((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+            <div className={styles.fieldGroup}>
+              <label htmlFor="te-app-title">App title</label>
+              <input
+                id="te-app-title"
+                type="text"
+                value={appTitle}
+                onChange={(e) => setAppTitle(e.target.value)}
+                required
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label htmlFor="te-tagline">Tagline</label>
+              <textarea
+                id="te-tagline"
+                rows={2}
+                value={tagline}
+                onChange={(e) => setTagline(e.target.value)}
+                placeholder="Shown to students under the countdown"
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label htmlFor="te-copy-tone">Copy tone</label>
+              <input
+                id="te-copy-tone"
+                type="text"
+                value={copyTone}
+                onChange={(e) => setCopyTone(e.target.value)}
+                placeholder="e.g. dark, retro-80s, ominous"
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label htmlFor="te-logo-url">Logo URL</label>
+              <input
+                id="te-logo-url"
+                type="url"
+                value={logoUrl}
+                onChange={(e) => setLogoUrl(e.target.value)}
+                placeholder="https://…  (optional)"
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label htmlFor="te-hero-url">Hero art URL</label>
+              <input
+                id="te-hero-url"
+                type="url"
+                value={heroUrl}
+                onChange={(e) => setHeroUrl(e.target.value)}
+                placeholder="https://…  (optional)"
+              />
+            </div>
+            <div className={styles.formActions}>
+              <button type="button" className={styles.btnSecondary} onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className={styles.btnPrimary} disabled={saving}>
+                {saving ? "Saving…" : "Save theme"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Challenge create / edit modal
 // ---------------------------------------------------------------------------
 
@@ -386,8 +689,16 @@ function ChallengeFormModal({
   const [semester, setSemester] = useState(existing?.semester ?? "");
   const [startDate, setStartDate] = useState(existing?.start_date ?? "");
   const [endDate, setEndDate] = useState(existing?.end_date ?? "");
+  const [themeId, setThemeId] = useState(existing?.theme_id ?? "");
+  const [themes, setThemes] = useState<Theme[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // A failed lookup just leaves the picker on "Default" — it must not block
+  // authoring the rest of the challenge.
+  useEffect(() => {
+    void themeApi.listThemes().then(setThemes).catch(() => setThemes([]));
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -397,11 +708,11 @@ function ChallengeFormModal({
       let saved: Challenge;
       if (existing) {
         saved = await api.updateChallenge(existing.id, {
-          name, semester, start_date: startDate, end_date: endDate,
+          name, semester, start_date: startDate, end_date: endDate, theme_id: themeId,
         });
       } else {
         saved = await api.createChallenge({
-          name, semester, start_date: startDate, end_date: endDate,
+          name, semester, start_date: startDate, end_date: endDate, theme_id: themeId,
         });
       }
       onSaved(saved);
@@ -440,6 +751,24 @@ function ChallengeFormModal({
               placeholder="e.g. Fall 2025"
             />
           </div>
+          <div className={styles.fieldGroup}>
+            <label htmlFor="cf-theme">Theme</label>
+            <select
+              id="cf-theme"
+              value={themeId}
+              onChange={(e) => setThemeId(e.target.value)}
+            >
+              <option value="">Default</option>
+              {themes.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <p className={styles.fieldHint}>
+              Skins the student app. Switching themes needs no code change.
+            </p>
+          </div>
           <div className={`${styles.fieldGroup} ${styles.fieldRow}`}>
             <div>
               <label htmlFor="cf-start">Start date</label>
@@ -468,6 +797,101 @@ function ChallengeFormModal({
             </button>
             <button type="submit" className={styles.btnPrimary} disabled={saving}>
               {saving ? "Saving…" : existing ? "Save changes" : "Create challenge"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Duplicate challenge modal (US-14)
+// ---------------------------------------------------------------------------
+
+function DuplicateChallengeModal({
+  challenge,
+  onClose,
+  onDuplicated,
+}: {
+  challenge: ChallengeSummary | Challenge;
+  onClose: () => void;
+  onDuplicated: (c: Challenge) => void;
+}) {
+  // Prefilled rather than one-tap: the server would derive this same name, but
+  // the semester is the field an admin actually came here to change. Strip an
+  // existing suffix first (mirroring the server) so duplicating a copy suggests
+  // "X (Copy)", not "X (Copy) (Copy)".
+  const suggestedName = `${challenge.name.replace(/\s*\(Copy(?: \d+)?\)$/, "")} (Copy)`;
+  const [name, setName] = useState(suggestedName);
+  const [semester, setSemester] = useState(challenge.semester);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSaving(true);
+    try {
+      // Send the name only when the admin actually chose it. Left untouched, the
+      // suggestion is ours, not theirs — posting it verbatim would 409 the second
+      // time you duplicate into the same semester, when what the admin wants is
+      // the next free "(Copy N)". Omitting it lets the server derive that.
+      // An explicit, admin-typed collision still 409s, which is correct.
+      const chosenName = name.trim() === suggestedName ? undefined : name;
+      onDuplicated(
+        await api.duplicateChallenge(challenge.id, { name: chosenName, semester }),
+      );
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Duplicate failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className={styles.overlay}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Duplicate challenge"
+    >
+      <div className={styles.modal}>
+        <h2>Duplicate challenge</h2>
+        {error && <p className={styles.error}>{error}</p>}
+        <form onSubmit={(e) => void handleSubmit(e)}>
+          <div className={styles.fieldGroup}>
+            <label htmlFor="dup-name">New challenge name</label>
+            <input
+              id="dup-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </div>
+          <div className={styles.fieldGroup}>
+            <label htmlFor="dup-semester">Semester</label>
+            <input
+              id="dup-semester"
+              type="text"
+              value={semester}
+              onChange={(e) => setSemester(e.target.value)}
+              required
+              placeholder="e.g. Spring 2026"
+            />
+            <p className={styles.fieldHint}>
+              Tasks, quiz items, and theme are copied, dates included. The copy
+              starts as a draft — retime it before publishing. If the suggested
+              name is taken, the next free number is used.
+            </p>
+          </div>
+          <div className={styles.formActions}>
+            <button type="button" className={styles.btnSecondary} onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className={styles.btnPrimary} disabled={saving}>
+              {saving ? "Duplicating…" : "Duplicate"}
             </button>
           </div>
         </form>
@@ -636,11 +1060,570 @@ function TaskFormModal({
 }
 
 // ---------------------------------------------------------------------------
+// Assessment items panel (FR-B3 / US-12)
+// ---------------------------------------------------------------------------
+
+function AssessmentItemsPanel({
+  challengeId,
+  task,
+  onClose,
+}: {
+  challengeId: number;
+  task: Task;
+  onClose: () => void;
+}) {
+  const [items, setItems] = useState<AssessmentItem[]>(
+    task.assessment_items ?? [],
+  );
+  const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // The item whose scores are being reviewed, if any (FR-E5).
+  const [scoringItem, setScoringItem] = useState<AssessmentItem | null>(null);
+
+  async function handleDelete(itemId: number) {
+    try {
+      await api.deleteAssessmentItem(challengeId, task.id, itemId);
+      setItems((prev) => prev.filter((i) => i.id !== itemId));
+    } catch (err) {
+      setError(
+        err instanceof api.ApiError ? err.message : "Delete failed",
+      );
+    }
+  }
+
+  function handleAdded(item: AssessmentItem) {
+    setItems((prev) => [...prev, item]);
+    setShowForm(false);
+  }
+
+  return (
+    <div
+      className={styles.overlay}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Assessment items for ${task.title}`}
+    >
+      <div className={`${styles.modal} ${styles.modalWide}`}>
+        <h2>Assessment items — {task.title}</h2>
+        {error && <p className={styles.error}>{error}</p>}
+
+        {items.length === 0 && !showForm && (
+          <p className={styles.empty}>
+            No assessment items yet. Add an MCQ or reflection.
+          </p>
+        )}
+
+        {items.length > 0 && (
+          <ul className={styles.itemList} aria-label="Assessment items">
+            {items.map((item) => (
+              <li key={item.id} className={styles.assessmentItem}>
+                <div className={styles.itemBody}>
+                  <span className={styles.itemTypeBadge}>
+                    {item.item_type === "mcq" ? "MCQ" : "Reflection"}
+                  </span>
+                  <span className={styles.outcomeBadge}>
+                    {item.outcome_tag}
+                  </span>
+                  <p className={styles.itemPrompt}>{item.prompt}</p>
+                  {item.item_type === "mcq" && item.options && (
+                    <div className={styles.itemMeta}>
+                      Options: {item.options.join(", ")} · Answer:{" "}
+                      <strong>{item.answer_key}</strong>
+                    </div>
+                  )}
+                  {item.item_type === "reflection" && item.rubric && (
+                    <div className={styles.itemMeta}>
+                      Rubric: {item.rubric}
+                    </div>
+                  )}
+                </div>
+                <div className={styles.itemActions}>
+                  <button
+                    type="button"
+                    className={styles.btnSecondary}
+                    onClick={() => setScoringItem(item)}
+                    aria-label={`Scores for assessment item: ${item.prompt.slice(0, 30)}`}
+                  >
+                    Scores
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.btnDanger}
+                    onClick={() => void handleDelete(item.id)}
+                    aria-label={`Delete assessment item: ${item.prompt.slice(0, 30)}`}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {showForm && (
+          <AssessmentItemFormModal
+            challengeId={challengeId}
+            taskId={task.id}
+            onCancel={() => setShowForm(false)}
+            onSaved={handleAdded}
+          />
+        )}
+
+        {scoringItem && (
+          <ScoreOverridePanel
+            challengeId={challengeId}
+            taskId={task.id}
+            item={scoringItem}
+            onClose={() => setScoringItem(null)}
+          />
+        )}
+
+        <div className={styles.formActions}>
+          {!showForm && (
+            <button
+              type="button"
+              className={styles.btnSecondary}
+              onClick={() => setShowForm(true)}
+            >
+              + Add item
+            </button>
+          )}
+          <button
+            type="button"
+            className={styles.btnPrimary}
+            onClick={onClose}
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Score override (FR-E5)
+// ---------------------------------------------------------------------------
+
+/** 0..1 as a percentage, for reading. The stored value stays a fraction. */
+function scorePercent(score: number): string {
+  return `${Math.round(score * 100)}%`;
+}
+
+/**
+ * Read one item's responses and correct a score by hand (US-19 / FR-E5).
+ *
+ * Modelled on {@link CompletionOverridePanel}, with one deliberate difference: no
+ * reason prompt. FR-D6 requires a reason for a check-in override and an audit row to
+ * put it on; FR-E5 requires neither, and asks only that the score be marked
+ * scored_by "human" — which the row itself records.
+ *
+ * Opened from {@link AssessmentItemsPanel} for either item type. A reflection is the
+ * motivating case, but an admin repairing scores after a bad MCQ answer key is a real
+ * need and the route already answers it.
+ *
+ * Exported for its own test, as {@link CompletionOverridePanel} is: it sits three
+ * modals deep in the builder, and reaching it through the whole tree would test the
+ * path rather than the panel.
+ */
+export function ScoreOverridePanel({
+  challengeId,
+  taskId,
+  item,
+  onClose,
+}: {
+  challengeId: number;
+  taskId: number;
+  item: AssessmentItem;
+  onClose: () => void;
+}) {
+  const [responses, setResponses] = useState<AssessmentResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // The response being edited, and the raw text of the score box. Kept as a string so
+  // a half-typed "0." is not parsed to 0 under the admin's fingers.
+  const [editing, setEditing] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setResponses(await api.listAssessmentResponses(challengeId, taskId, item.id));
+      setError(null);
+    } catch (err) {
+      setError(
+        err instanceof api.ApiError ? err.message : "Could not load responses",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [challengeId, taskId, item.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  function startEditing(response: AssessmentResponse) {
+    setEditing(response.id);
+    setDraft(String(response.score));
+    setError(null);
+  }
+
+  async function handleSave(responseId: number) {
+    const score = Number(draft);
+    if (draft.trim() === "" || Number.isNaN(score)) {
+      setError("Enter a score between 0 and 1.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await api.overrideAssessmentScore(
+        challengeId,
+        taskId,
+        item.id,
+        responseId,
+        { score },
+      );
+      // Patch the one row rather than refetching: the server's echo is the row, and a
+      // reload would scroll a long list back to the top mid-review.
+      setResponses((prev) =>
+        prev.map((r) => (r.id === responseId ? updated : r)),
+      );
+      setEditing(null);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className={styles.overlay}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Scores for ${item.prompt.slice(0, 40)}`}
+    >
+      <div className={`${styles.modal} ${styles.modalWide} ${styles.overridePanel}`}>
+        <h2>Scores — {item.item_type === "mcq" ? "MCQ" : "Reflection"}</h2>
+        <p className={styles.itemPrompt}>{item.prompt}</p>
+        {error && <p className={styles.error}>{error}</p>}
+
+        {loading && <p className={styles.empty}>Loading…</p>}
+
+        {!loading && responses.length === 0 && (
+          <p className={styles.empty}>No one has answered this item yet.</p>
+        )}
+
+        {!loading && responses.length > 0 && (
+          <ul className={styles.itemList} aria-label="Responses">
+            {responses.map((r) => (
+              <li key={r.id} className={styles.assessmentItem}>
+                <div className={styles.itemBody}>
+                  <span className={styles.outcomeBadge}>{r.student_subject}</span>
+                  <span
+                    className={styles.methodBadge}
+                    data-scored-by={r.scored_by}
+                  >
+                    {r.scored_by}
+                  </span>
+
+                  <p className={styles.responseText}>{r.response}</p>
+
+                  {r.ai_feedback && (
+                    // Kept visible after an override: scored_by says the score is not
+                    // the machine's, and this says what the machine had said. With no
+                    // audit table, it is the only trace the override leaves.
+                    <div className={styles.itemMeta}>
+                      Guide feedback: {r.ai_feedback}
+                    </div>
+                  )}
+                </div>
+
+                {editing === r.id ? (
+                  <div className={styles.scoreEditor}>
+                    <label
+                      className={styles.scoreLabel}
+                      htmlFor={`score-${r.id}`}
+                    >
+                      Score (0–1)
+                    </label>
+                    <input
+                      id={`score-${r.id}`}
+                      className={styles.scoreInput}
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={draft}
+                      disabled={saving}
+                      onChange={(e) => setDraft(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className={styles.btnPrimary}
+                      disabled={saving}
+                      onClick={() => void handleSave(r.id)}
+                    >
+                      {saving ? "Saving…" : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.btnSecondary}
+                      disabled={saving}
+                      onClick={() => setEditing(null)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className={styles.scoreEditor}>
+                    <strong className={styles.scoreValue}>
+                      {scorePercent(r.score)}
+                    </strong>
+                    <button
+                      type="button"
+                      className={styles.btnSecondary}
+                      onClick={() => startEditing(r)}
+                      aria-label={`Override score for ${r.student_subject}`}
+                    >
+                      Override
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className={styles.formActions}>
+          <button type="button" className={styles.btnPrimary} onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Assessment item form (inline in panel)
+// ---------------------------------------------------------------------------
+
+function AssessmentItemFormModal({
+  challengeId,
+  taskId,
+  onCancel,
+  onSaved,
+}: {
+  challengeId: number;
+  taskId: number;
+  onCancel: () => void;
+  onSaved: (item: AssessmentItem) => void;
+}) {
+  const [itemType, setItemType] = useState<"mcq" | "reflection">("mcq");
+  const [prompt, setPrompt] = useState("");
+  const [outcomeTag, setOutcomeTag] = useState("");
+  // MCQ
+  const [options, setOptions] = useState(["", ""]);
+  const [answerKey, setAnswerKey] = useState("");
+  // Reflection
+  const [rubric, setRubric] = useState("");
+
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  function addOption() {
+    setOptions((prev) => [...prev, ""]);
+  }
+
+  function updateOption(idx: number, value: string) {
+    setOptions((prev) => prev.map((o, i) => (i === idx ? value : o)));
+  }
+
+  function removeOption(idx: number) {
+    if (options.length <= 2) return;
+    setOptions((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSaving(true);
+    try {
+      let item: AssessmentItem;
+      if (itemType === "mcq") {
+        const cleaned = options.map((o) => o.trim()).filter(Boolean);
+        if (cleaned.length < 2) {
+          setError("At least 2 non-empty options are required");
+          setSaving(false);
+          return;
+        }
+        if (!cleaned.includes(answerKey.trim())) {
+          setError("Answer key must match one of the options");
+          setSaving(false);
+          return;
+        }
+        item = await api.addAssessmentItem(challengeId, taskId, {
+          item_type: "mcq",
+          prompt,
+          outcome_tag: outcomeTag,
+          options: cleaned,
+          answer_key: answerKey.trim(),
+        });
+      } else {
+        item = await api.addAssessmentItem(challengeId, taskId, {
+          item_type: "reflection",
+          prompt,
+          outcome_tag: outcomeTag,
+          rubric,
+        });
+      }
+      onSaved(item);
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className={styles.itemForm}>
+      <h3>New {itemType === "mcq" ? "MCQ" : "Reflection"}</h3>
+      {error && <p className={styles.error}>{error}</p>}
+      <form onSubmit={(e) => void handleSubmit(e)}>
+        <div className={styles.fieldGroup}>
+          <label htmlFor="ai-type">Item type</label>
+          <select
+            id="ai-type"
+            value={itemType}
+            onChange={(e) =>
+              setItemType(e.target.value as "mcq" | "reflection")
+            }
+          >
+            <option value="mcq">Multiple choice (MCQ)</option>
+            <option value="reflection">Reflection</option>
+          </select>
+        </div>
+        <div className={styles.fieldGroup}>
+          <label htmlFor="ai-prompt">Prompt</label>
+          <textarea
+            id="ai-prompt"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            required
+            placeholder="Question or reflection prompt shown to students"
+          />
+        </div>
+        <div className={styles.fieldGroup}>
+          <label htmlFor="ai-outcome">Learning outcome tag</label>
+          <input
+            id="ai-outcome"
+            type="text"
+            value={outcomeTag}
+            onChange={(e) => setOutcomeTag(e.target.value)}
+            required
+            placeholder="e.g. sleep-hygiene, nutrition, mental-health"
+          />
+        </div>
+
+        {itemType === "mcq" && (
+          <>
+            <div className={styles.fieldGroup}>
+              <label>Options (min 2)</label>
+              {options.map((opt, idx) => (
+                <div key={idx} className={styles.optionRow}>
+                  <input
+                    type="text"
+                    value={opt}
+                    onChange={(e) => updateOption(idx, e.target.value)}
+                    placeholder={`Option ${idx + 1}`}
+                    required
+                  />
+                  {options.length > 2 && (
+                    <button
+                      type="button"
+                      className={styles.btnDanger}
+                      onClick={() => removeOption(idx)}
+                      aria-label={`Remove option ${idx + 1}`}
+                    >
+                      x
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                className={styles.btnGhost}
+                onClick={addOption}
+              >
+                + Add option
+              </button>
+            </div>
+            <div className={styles.fieldGroup}>
+              <label htmlFor="ai-answer">Answer key</label>
+              <select
+                id="ai-answer"
+                value={answerKey}
+                onChange={(e) => setAnswerKey(e.target.value)}
+                required
+              >
+                <option value="">— select correct answer —</option>
+                {options
+                  .filter((o) => o.trim() !== "")
+                  .map((o) => (
+                    <option key={o} value={o.trim()}>
+                      {o.trim()}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </>
+        )}
+
+        {itemType === "reflection" && (
+          <div className={styles.fieldGroup}>
+            <label htmlFor="ai-rubric">Rubric</label>
+            <textarea
+              id="ai-rubric"
+              value={rubric}
+              onChange={(e) => setRubric(e.target.value)}
+              required
+              placeholder="Scoring criteria, e.g. 1 – vague; 2 – specific; 3 – actionable"
+            />
+          </div>
+        )}
+
+        <div className={styles.formActions}>
+          <button
+            type="button"
+            className={styles.btnSecondary}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className={styles.btnPrimary}
+            disabled={saving}
+          >
+            {saving ? "Saving…" : "Add item"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Root component
 // ---------------------------------------------------------------------------
 
 export function ChallengeBuilder() {
   const { session, signOut } = useSession();
+  const navigate = useNavigate();
   const [view, setView] = useState<View>({ kind: "list" });
 
   return (
@@ -653,6 +1636,13 @@ export function ChallengeBuilder() {
               {session.affiliation}
             </span>
           )}
+          <button
+            type="button"
+            className={styles.btnSecondary}
+            onClick={() => navigate("/admin/reports")}
+          >
+            Reports
+          </button>
           <button
             type="button"
             className={styles.btnSecondary}
@@ -674,9 +1664,366 @@ export function ChallengeBuilder() {
           <ChallengeDetail
             id={view.id}
             onBack={() => setView({ kind: "list" })}
+            onDuplicated={(id) => setView({ kind: "detail", id })}
           />
         )}
       </main>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Manual completion override + audit (FR-D6 / US-27)
+// ---------------------------------------------------------------------------
+
+function fmtTs(ts: string) {
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime())
+    ? ts
+    : d.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+}
+
+/**
+ * Admin surface for FR-D6: mark a student complete by hand, correct an
+ * erroneous check-in, or remove one — each write leaving an audit row.
+ *
+ * Fetches on mount rather than reading off the task (as AssessmentItemsPanel
+ * does): TaskOut deliberately carries no check-ins array, since that would be an
+ * unbounded per-task payload on every builder load.
+ *
+ * Exported for the live event dashboard (US-28), whose Manual override button
+ * opens this same panel.
+ */
+export function CompletionOverridePanel({
+  challengeId,
+  task,
+  onClose,
+}: {
+  challengeId: number;
+  task: Task;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<"checkins" | "audit">("checkins");
+  const [checkins, setCheckins] = useState<CheckIn[]>([]);
+  const [audits, setAudits] = useState<CheckInAudit[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  // The check-in awaiting a removal reason, if any.
+  const [removing, setRemoving] = useState<CheckIn | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [c, a] = await Promise.all([
+        api.listCheckIns(challengeId, task.id),
+        api.listCheckInAudits(challengeId, task.id),
+      ]);
+      setCheckins(c);
+      setAudits(a);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Could not load check-ins");
+    } finally {
+      setLoading(false);
+    }
+  }, [challengeId, task.id]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function handleRemove(reason: string) {
+    if (!removing) return;
+    try {
+      await api.removeCheckIn(challengeId, task.id, removing.id, { reason });
+      setRemoving(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Remove failed");
+    }
+  }
+
+  return (
+    <div
+      className={styles.overlay}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Check-ins for ${task.title}`}
+    >
+      <div
+        className={`${styles.modal} ${styles.modalWide} ${styles.overridePanel}`}
+      >
+        <h2>Check-ins — {task.title}</h2>
+        {error && <p className={styles.error}>{error}</p>}
+
+        <div className={styles.tabRow} role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "checkins"}
+            className={tab === "checkins" ? styles.tabBtnActive : styles.tabBtn}
+            onClick={() => setTab("checkins")}
+          >
+            Check-ins ({checkins.length})
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "audit"}
+            className={tab === "audit" ? styles.tabBtnActive : styles.tabBtn}
+            onClick={() => setTab("audit")}
+          >
+            Audit ({audits.length})
+          </button>
+        </div>
+
+        {loading && <p className={styles.empty}>Loading…</p>}
+
+        {!loading && tab === "checkins" && (
+          <>
+            {checkins.length === 0 && !adding && (
+              <p className={styles.empty}>
+                No check-ins for this task yet.
+              </p>
+            )}
+
+            {checkins.length > 0 && (
+              <ul className={styles.checkinList} aria-label="Check-ins">
+                {checkins.map((c) => (
+                  <li key={c.id} className={styles.checkinRow}>
+                    <span className={styles.checkinSubject}>{c.student_subject}</span>
+                    <div className={styles.checkinMeta}>
+                      <span className={styles.methodBadge}>{c.method}</span>
+                      <span>{fmtTs(c.ts)}</span>
+                    </div>
+                    {c.verified_by && (
+                      <div className={styles.checkinMeta}>by {c.verified_by}</div>
+                    )}
+                    {removing?.id === c.id ? (
+                      <ReasonPrompt
+                        label={`Remove the check-in for ${c.student_subject}`}
+                        submitLabel="Remove"
+                        onCancel={() => setRemoving(null)}
+                        onSubmit={handleRemove}
+                      />
+                    ) : (
+                      <div className={styles.checkinActions}>
+                        <button
+                          type="button"
+                          className={styles.btnDanger}
+                          onClick={() => setRemoving(c)}
+                          aria-label={`Remove check-in for ${c.student_subject}`}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {adding ? (
+              <ManualCheckInForm
+                challengeId={challengeId}
+                taskId={task.id}
+                onCancel={() => setAdding(false)}
+                onSaved={() => { setAdding(false); void load(); }}
+              />
+            ) : (
+              <button
+                type="button"
+                className={styles.btnSecondary}
+                onClick={() => { setError(null); setAdding(true); }}
+              >
+                + Mark complete
+              </button>
+            )}
+          </>
+        )}
+
+        {!loading && tab === "audit" && (
+          <>
+            {audits.length === 0 && (
+              <p className={styles.empty}>No changes recorded yet.</p>
+            )}
+            {audits.length > 0 && (
+              <ul className={styles.auditList} aria-label="Audit trail">
+                {audits.map((a) => (
+                  <li key={a.id} className={styles.auditRow}>
+                    <div className={styles.checkinMeta}>
+                      <span className={`${styles.actionBadge} ${actionClass(a.action)}`}>
+                        {a.action}
+                      </span>
+                      <span>{fmtTs(a.ts)}</span>
+                    </div>
+                    <div className={styles.checkinMeta}>by {a.actor_subject}</div>
+                    <p className={styles.auditReason}>{a.reason}</p>
+                    {a.prior_state && (
+                      <details>
+                        <summary>Prior state</summary>
+                        <pre className={styles.auditSnapshot}>
+                          {JSON.stringify(a.prior_state, null, 2)}
+                        </pre>
+                      </details>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+
+        <div className={styles.formActions}>
+          <button type="button" className={styles.btnPrimary} onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function actionClass(action: CheckInAudit["action"]) {
+  if (action === "create") return styles.actionCreate;
+  if (action === "update") return styles.actionUpdate;
+  return styles.actionDelete;
+}
+
+/** Inline reason capture. Not window.confirm — a reason is mandatory (FR-D6). */
+function ReasonPrompt({
+  label,
+  submitLabel,
+  onCancel,
+  onSubmit,
+}: {
+  label: string;
+  submitLabel: string;
+  onCancel: () => void;
+  onSubmit: (reason: string) => void | Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const blank = reason.trim() === "";
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (blank) return;
+    setSaving(true);
+    try {
+      await onSubmit(reason.trim());
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className={styles.itemForm} onSubmit={(e) => void handleSubmit(e)}>
+      <div className={styles.fieldGroup}>
+        <label htmlFor="removeReason">{label} — reason</label>
+        <textarea
+          id="removeReason"
+          rows={2}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Why is this change being made?"
+          required
+        />
+      </div>
+      <div className={styles.formActions}>
+        <button type="button" className={styles.btnSecondary} onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className={styles.btnDanger} disabled={saving || blank}>
+          {saving ? "Working…" : submitLabel}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function ManualCheckInForm({
+  challengeId,
+  taskId,
+  onCancel,
+  onSaved,
+}: {
+  challengeId: number;
+  taskId: number;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [subject, setSubject] = useState("");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const incomplete = subject.trim() === "" || reason.trim() === "";
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (incomplete) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await api.createManualCheckIn(challengeId, taskId, {
+        student_subject: subject.trim(),
+        reason: reason.trim(),
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof api.ApiError ? messageFor(err) : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className={styles.itemForm} onSubmit={(e) => void handleSubmit(e)}>
+      {error && <p className={styles.error}>{error}</p>}
+      <div className={styles.fieldGroup}>
+        <label htmlFor="studentSubject">Student SSO subject</label>
+        <input
+          id="studentSubject"
+          type="text"
+          inputMode="email"
+          autoComplete="off"
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          placeholder="student@csub.edu"
+          required
+        />
+      </div>
+      <div className={styles.fieldGroup}>
+        <label htmlFor="manualReason">Reason</label>
+        <textarea
+          id="manualReason"
+          rows={2}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Why is this being marked by hand?"
+          required
+        />
+      </div>
+      <div className={styles.formActions}>
+        <button type="button" className={styles.btnSecondary} onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className={styles.btnPrimary} disabled={saving || incomplete}>
+          {saving ? "Saving…" : "Mark complete"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** Turn the API's 409/404 into something an admin at a booth can act on. */
+function messageFor(err: InstanceType<typeof api.ApiError>) {
+  if (err.status === 409) {
+    return "That student is already checked in for this task — use Remove, then re-add.";
+  }
+  return err.message;
 }

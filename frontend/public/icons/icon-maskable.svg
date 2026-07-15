@@ -1,0 +1,15 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Wellness Passport">
+  <rect width="512" height="512" fill="#12100f"/>
+  <!-- Maskable: the platform crops this to an arbitrary shape, guaranteeing only a
+       centered circle of 80% of the width. The mark's circumradius must fit inside
+       it: sqrt(130^2 + 162.5^2) = 208.1, and 208.1 * k <= 0.4 * 512 gives k <= 0.984.
+       At 0.98 the mark is only ~62% of the width — that looks small next to icon.svg,
+       but it is the point: the #12100f field bleeds to all four edges and the mask
+       eats whatever it wants without ever clipping the shield's top corners. -->
+  <g transform="translate(256 256) scale(0.98) translate(0 -12.5)">
+    <rect x="-130" y="-150" width="260" height="300" rx="60" fill="#ff4438"/>
+    <path d="M0 -150 C 60 -110 110 -110 130 -120 L130 30 C130 110 70 150 0 175 C-70 150 -130 110 -130 30 L-130 -120 C-110 -110 -60 -110 0 -150 Z" fill="#ffb4ab"/>
+    <rect x="-18" y="-70" width="36" height="140" rx="10" fill="#12100f"/>
+    <rect x="-70" y="-18" width="140" height="36" rx="10" fill="#12100f"/>
+  </g>
+</svg>

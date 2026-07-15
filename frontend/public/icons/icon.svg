@@ -1,0 +1,12 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Wellness Passport">
+  <rect width="512" height="512" fill="#12100f"/>
+  <!-- The mark's bounding box is x[-130,130], y[-150,175] — its center is y=12.5,
+       not 0, so it is re-centered before scaling. 1.229 puts it at 78% of the
+       canvas: the "any" purpose icon is shown uncropped, so it can fill the tile. -->
+  <g transform="translate(256 256) scale(1.229) translate(0 -12.5)">
+    <rect x="-130" y="-150" width="260" height="300" rx="60" fill="#ff4438"/>
+    <path d="M0 -150 C 60 -110 110 -110 130 -120 L130 30 C130 110 70 150 0 175 C-70 150 -130 110 -130 30 L-130 -120 C-110 -110 -60 -110 0 -150 Z" fill="#ffb4ab"/>
+    <rect x="-18" y="-70" width="36" height="140" rx="10" fill="#12100f"/>
+    <rect x="-70" y="-18" width="140" height="36" rx="10" fill="#12100f"/>
+  </g>
+</svg>
