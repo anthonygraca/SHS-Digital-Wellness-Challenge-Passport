@@ -2,6 +2,11 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import type { ReactNode } from "react";
 import type { Session } from "../types/session";
 import { fetchSession, logout as apiLogout } from "./auth";
+import {
+  clearOfflineSnapshot,
+  readSessionSnapshot,
+  writeSessionSnapshot,
+} from "../offline/snapshot";
 
 interface SessionContextValue {
   session: Session | null;
@@ -20,12 +25,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     let next: Session | null = null;
     try {
       next = await fetchSession();
+      // The server is the authority on who is signed in, so its answer is what we
+      // cache — and a "no" clears the cache rather than being ignored. That is what
+      // keeps the offline fallback below from ever resurrecting an ended session.
+      if (next) writeSessionSnapshot(next);
+      else clearOfflineSnapshot();
     } catch {
       // Offline, or the server is unreachable. fetch *rejects* here rather than
       // resolving with !res.ok, so fetchSession's own null-on-failure guard never
       // runs. Without this catch the rejection escapes refresh(), setLoading(false)
       // never runs, and every screen sits on "Loading…" forever instead of failing.
-      next = null;
+      //
+      // Falling back to the last known session is what lets the passport render its
+      // cached progress (US-6 / FR-C4) instead of bouncing to sign-in — which we
+      // could not complete offline anyway, SAML being a redirect to the IdP.
+      next = readSessionSnapshot();
     }
     setSession(next);
     setLoading(false);
@@ -42,6 +56,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // expires on its own, and there is no failure here worth showing a student
       // who has already been returned to the sign-in screen.
     }
+    // Unconditional, and before the state update: signing out on a shared phone has
+    // to take the cached passport with it, whether or not the server heard about it.
+    clearOfflineSnapshot();
     setSession(null);
   }, []);
 

@@ -1,0 +1,32 @@
+/* Static, not sticky: the passport's sheets and scanner overlay own z-index 20+,
+   and a pinned banner would either fight them or sit on top of a modal. It is
+   non-interactive, so the 44x44 touch-target floor does not apply. */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--wp-outline-variant);
+  background: color-mix(in srgb, var(--wp-error) 12%, var(--wp-surface-container));
+  color: var(--wp-on-surface);
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--wp-surface-container-high);
+  color: var(--wp-on-surface-variant);
+}
+
+.text {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.35;
+}
