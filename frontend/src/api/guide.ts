@@ -1,4 +1,4 @@
-import type { CrisisResources } from "../types/guide";
+import type { CrisisResources, GuideReply } from "../types/guide";
 import { request } from "./http";
 
 const PREFIX = "/api/guide";
@@ -12,4 +12,15 @@ const PREFIX = "/api/guide";
  */
 export function fetchCrisisResources(): Promise<CrisisResources> {
   return request<CrisisResources>(`${PREFIX}/crisis-resources`);
+}
+
+/**
+ * Send a message to the wellness guide (US-16, FR-E2, FR-E3).
+ * Returns the guide's reply with safety guardrails applied.
+ */
+export function sendMessage(message: string): Promise<GuideReply> {
+  return request<GuideReply>(`${PREFIX}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
 }

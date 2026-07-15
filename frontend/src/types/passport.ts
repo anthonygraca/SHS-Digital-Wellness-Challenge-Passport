@@ -21,6 +21,8 @@ export interface PassportWeek {
  */
 export interface ThemeConfig {
   id: string;
+  name?: string; // US-16: Theme name for display
+  personaName?: string; // US-16: Wellness guide persona name
   /** CSS custom-property suffix -> value; applied as `--wp-<key>`. */
   palette: Record<string, string>;
   logoUrl: string | null;

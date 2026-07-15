@@ -21,6 +21,7 @@ import type {
 import { useTheme } from "../../theme/ThemeProvider";
 import { resolveThemeCopy } from "../../theme/themes";
 import CrisisResources from "../CrisisResources/CrisisResources";
+import { WellnessGuide } from "../WellnessGuide/WellnessGuide";
 import { BoltIcon, CheckCircleIcon, LockIcon, TrophyIcon } from "../icons";
 import { KnowledgeCheck } from "./KnowledgeCheck";
 import { QrScanner } from "./QrScanner";
@@ -446,6 +447,12 @@ export function PassportView({
           </div>
         </div>
       )}
+
+      {/* US-16: Wellness Guide chat interface */}
+      <WellnessGuide 
+        themeName={theme?.name} 
+        personaName={theme?.personaName || "Wellness Guide"}
+      />
     </main>
   );
 }

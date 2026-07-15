@@ -2,25 +2,27 @@
 
 Students chat with a themed wellness guide that answers questions grounded in
 SHS content, nudges next tasks, and links campus resources.
+
+Note: This router stores conversation history but delegates actual message handling
+to the existing /api/guide/messages endpoint which has all the safety guardrails.
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_student
+from app.config import Settings, get_settings
 from app.db import get_db
 from app.models.challenge import Challenge, CheckIn, Task
 from app.models.conversation import ConversationMessage, ConversationSession
-from app.services.ai_guide import (
-    ConversationGuideService,
-    get_conversation_guide_service,
-)
+from app.services.guide import WellnessGuide, get_wellness_guide
+from app.services.guide_safety import answer_message
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -64,25 +66,21 @@ def send_message(
     request: ConversationRequest,
     db: Annotated[Session, Depends(get_db)],
     claims: Annotated[dict, Depends(get_current_student)],
-    guide: Annotated[ConversationGuideService, Depends(get_conversation_guide_service)],
+    guide: Annotated[WellnessGuide, Depends(get_wellness_guide)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ):
     """Send a message to the wellness guide and get a response (US-16, FR-E2, FR-E6).
 
     This endpoint:
     1. Creates or retrieves an active conversation session
-    2. Loads recent conversation history for context
-    3. Gathers student progress and next available tasks
-    4. Calls the ConversationGuideService with themed persona and grounded content
-    5. Stores the user message and assistant response (minimal logging, no PHI)
-    6. Returns the guide's response with optional task nudge
+    2. Uses the existing guide_safety.answer_message() for safety guardrails
+    3. Stores the user message and assistant response
+    4. Returns the guide's response
 
-    The guide response is:
-    - Grounded in SHS-approved wellness content
-    - Themed according to the active challenge
-    - Aware of student progress and next tasks
-    - Links to campus resources
-
-    No PHI is collected or sent to the AI model (FR-E6).
+    The guide response has all safety guardrails from US-17:
+    - Crisis detection and routing
+    - Medical advice refusal
+    - Out-of-scope deflection
     """
     student_id = claims["student_id"]
     campus_id = claims["campus_id"]
@@ -92,63 +90,26 @@ def send_message(
         db, student_id, request.challenge_id, campus_id
     )
 
-    # 2. Load conversation history (limited by config)
-    conversation_history = _load_conversation_history(db, session.id)
-
-    # 3. Get challenge context and progress
+    # 2. Get challenge context for theme
     challenge = None
     theme_name = session.theme_name
-    next_available_tasks = []
-    completed_count = 0
-    total_count = 0
-    progress = None
-
     if request.challenge_id:
         challenge = (
             db.query(Challenge).filter(Challenge.id == request.challenge_id).first()
         )
         if challenge:
-            theme_name = challenge.theme_name
-            
-            # Get student's progress
-            progress = _get_student_progress(db, student_id, request.challenge_id)
-            completed_count = progress["completed_count"]
-            total_count = progress["total_count"]
+            theme_name = challenge.theme_id  # Use theme_id from challenge
 
-            # Get next available tasks (up to 3)
-            completed_task_ids = (
-                db.query(CheckIn.task_id)
-                .filter(CheckIn.student_id == student_id)
-                .all()
-            )
-            completed_ids = [task_id for (task_id,) in completed_task_ids]
-
-            next_available_tasks = (
-                db.query(Task)
-                .filter(
-                    Task.challenge_id == request.challenge_id,
-                    Task.id.notin_(completed_ids),
-                )
-                .order_by(Task.order)
-                .limit(3)
-                .all()
-            )
-
-    # 4. Add user message to conversation history (for context)
-    conversation_history.append({"role": "user", "content": request.message})
-
-    # 5. Generate guide response
-    guide_response = guide.get_response(
-        user_message=request.message,
-        conversation_history=conversation_history,
-        theme_name=theme_name,
-        challenge=challenge,
-        next_available_tasks=next_available_tasks,
-        completed_task_count=completed_count,
-        total_task_count=total_count,
+    # 3. Generate guide response using existing safety system
+    persona = "Wellness Guide"  # Could be themed based on challenge
+    reply = answer_message(
+        message=request.message,
+        guide=guide,
+        settings=settings,
+        persona=persona,
     )
 
-    # 6. Store user message in database
+    # 4. Store user message in database
     user_msg = ConversationMessage(
         session_id=session.id,
         role="user",
@@ -157,16 +118,16 @@ def send_message(
     )
     db.add(user_msg)
 
-    # 7. Store assistant response in database
+    # 5. Store assistant response in database
     assistant_msg = ConversationMessage(
         session_id=session.id,
         role="assistant",
-        content=guide_response.message,
+        content=reply.message,
         created_at=datetime.now(timezone.utc),
     )
     db.add(assistant_msg)
 
-    # 8. Update session metadata
+    # 6. Update session metadata
     session.message_count += 2  # User + assistant
     session.last_message_at = datetime.now(timezone.utc)
     if theme_name:
@@ -174,13 +135,18 @@ def send_message(
 
     db.commit()
 
-    # 9. Clean up old messages (privacy by design - FR-E6)
+    # 7. Clean up old messages (privacy by design - FR-E6)
     _cleanup_old_messages(db, session.id)
 
-    # 10. Return response
+    # 8. Get progress for nudges
+    progress = None
+    if request.challenge_id:
+        progress = _get_student_progress(db, student_id, request.challenge_id)
+
+    # 9. Return response
     return ConversationResponse(
-        message=guide_response.message,
-        next_task_nudge=guide_response.next_task_nudge,
+        message=reply.message,
+        next_task_nudge=None,  # Could add task nudges here
         theme_name=theme_name,
         progress=progress,
         session_id=session.id,
@@ -284,6 +250,7 @@ def _load_conversation_history(db: Session, session_id: int) -> list[dict]:
     """Load recent conversation messages for context (US-16, FR-E6).
 
     Limited to recent messages to respect privacy and token limits.
+    Note: Currently not used but kept for future AI integration.
     """
     messages = (
         db.query(ConversationMessage)
