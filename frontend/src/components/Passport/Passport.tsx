@@ -386,11 +386,21 @@ export function Passport({
   useEffect(() => {
     if (!session || !session.isCurrentStudent) return;
     let active = true;
-    void fetchData().then((data) => {
-      if (!active) return;
-      setPassport(data);
-      setDataLoading(false);
-    });
+    void (async () => {
+      try {
+        const data = await fetchData();
+        if (active) setPassport(data);
+      } catch {
+        // Offline: fetch rejects instead of resolving !res.ok, so fetchPassport's
+        // null-on-failure guard never runs. Left uncaught this strands the screen
+        // on "Loading your passport…" permanently.
+        if (active) setPassport(null);
+      } finally {
+        // active-guarded: finally still runs when the effect was torn down
+        // mid-flight, and setting state after unmount is a no-op worth avoiding.
+        if (active) setDataLoading(false);
+      }
+    })();
     return () => {
       active = false;
     };
