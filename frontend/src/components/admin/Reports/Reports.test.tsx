@@ -1,14 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ApiError } from "../../../api/http";
-import type { ParticipationReport, WeekCompletion } from "../../../types/report";
+import type {
+  AttendanceReport,
+  ParticipationReport,
+  WeekCompletion,
+} from "../../../types/report";
 import { Reports } from "./Reports";
 
 const navigate = vi.fn();
 
 const api = vi.hoisted(() => ({
   getParticipationReport: vi.fn(),
+  getAttendanceReport: vi.fn(),
 }));
 
 vi.mock("react-router-dom", () => ({
@@ -19,10 +24,21 @@ vi.mock("react-router-dom", () => ({
 vi.mock("../../../api/reports", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../api/reports")>()),
   getParticipationReport: api.getParticipationReport,
+  getAttendanceReport: api.getAttendanceReport,
 }));
 
+// resetAllMocks, not clearAllMocks: clearAllMocks leaves mockResolvedValueOnce
+// queues in place, which the beforeEach defaults below would sit behind. The
+// vi.mock factory closes over these same fn objects, so the wiring survives.
 afterEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+});
+
+beforeEach(() => {
+  // The two cards load together under one Promise.all, so a test about the
+  // funnel still needs attendance to resolve. Individual tests override.
+  api.getParticipationReport.mockResolvedValue(asReport());
+  api.getAttendanceReport.mockResolvedValue(asAttendance());
 });
 
 const asWeek = (week_no: number, completed_count: number): WeekCompletion => ({
@@ -42,6 +58,23 @@ const asReport = (over: Partial<ParticipationReport> = {}): ParticipationReport 
   },
   total_enrollments: 40,
   weeks: [asWeek(1, 40), asWeek(2, 30), asWeek(3, 20), asWeek(4, 10)],
+  ...over,
+});
+
+/** 91 / 9 is the design prototype's own split, so fixture and card agree. */
+const asAttendance = (over: Partial<AttendanceReport> = {}): AttendanceReport => ({
+  challenge: {
+    id: 1,
+    name: "Stranger Things Wellness",
+    semester: "Fall 2026",
+    theme_id: "stranger-things",
+  },
+  total_checkins: 100,
+  methods: [
+    { method: "event_qr", count: 91 },
+    { method: "staff", count: 0 },
+    { method: "manual", count: 9 },
+  ],
   ...over,
 });
 
