@@ -25,6 +25,23 @@ class WeekOut(BaseModel):
     status: WeekStatus
 
 
+class ThemeConfigOut(BaseModel):
+    """The resolved re-skin config for the student app (FR-B4).
+
+    Carries the palette, assets and copy as data so a semester re-skin needs no
+    code deployment (NFR-6). ``palette`` maps a CSS custom-property suffix to its
+    value — the app applies each as ``--wp-<key>``.
+    """
+
+    id: str
+    palette: dict[str, str]
+    logoUrl: str | None = None
+    heroUrl: str | None = None
+    appTitle: str
+    tagline: str
+    copyTone: str
+
+
 class PassportOut(BaseModel):
     """The student's passport: challenge meta, derived counts, and week tiles.
 
@@ -34,7 +51,10 @@ class PassportOut(BaseModel):
     """
 
     challengeName: str
+    # The theme's id, kept for the app's static per-theme token blocks; null
+    # ``themeConfig`` means the default theme (unset or unknown ``theme``).
     theme: str
+    themeConfig: ThemeConfigOut | None = None
     totalWeeks: int
     completedWeeks: int
     remainingWeeks: int

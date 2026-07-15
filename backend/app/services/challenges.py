@@ -29,6 +29,7 @@ def create_challenge(db: Session, campus_id: str, data: ChallengeCreate) -> Chal
         semester=data.semester,
         start_date=data.start_date,
         end_date=data.end_date,
+        theme_id=data.theme_id,
         status="draft",
     )
     db.add(challenge)

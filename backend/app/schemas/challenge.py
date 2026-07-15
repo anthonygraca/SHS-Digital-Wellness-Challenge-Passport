@@ -173,6 +173,8 @@ class ChallengeCreate(BaseModel):
     semester: str
     start_date: date
     end_date: date
+    # Re-skin preset (FR-B4). Empty string = default theme.
+    theme_id: str = ""
 
     @model_validator(mode="after")
     def end_after_start(self) -> ChallengeCreate:
@@ -186,6 +188,8 @@ class ChallengeUpdate(BaseModel):
     semester: str | None = None
     start_date: date | None = None
     end_date: date | None = None
+    # "" resets to the default theme; omitted leaves the current one in place.
+    theme_id: str | None = None
 
 
 class ChallengeOut(BaseModel):
@@ -195,6 +199,7 @@ class ChallengeOut(BaseModel):
     semester: str
     start_date: date
     end_date: date
+    theme_id: str
     status: str
     tasks: list[TaskOut] = []
     created_at: datetime
@@ -212,6 +217,7 @@ class ChallengeSummary(BaseModel):
     semester: str
     start_date: date
     end_date: date
+    theme_id: str
     status: str
     created_at: datetime
     updated_at: datetime
