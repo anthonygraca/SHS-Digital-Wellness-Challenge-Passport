@@ -5,6 +5,7 @@ import * as api from "../../../api/challenges";
 import * as themeApi from "../../../api/themes";
 import type {
   AssessmentItem,
+  AssessmentResponse,
   Challenge,
   ChallengeSummary,
   CheckIn,
@@ -1076,6 +1077,8 @@ function AssessmentItemsPanel({
   );
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The item whose scores are being reviewed, if any (FR-E5).
+  const [scoringItem, setScoringItem] = useState<AssessmentItem | null>(null);
 
   async function handleDelete(itemId: number) {
     try {
@@ -1134,14 +1137,24 @@ function AssessmentItemsPanel({
                     </div>
                   )}
                 </div>
-                <button
-                  type="button"
-                  className={styles.btnDanger}
-                  onClick={() => void handleDelete(item.id)}
-                  aria-label={`Delete assessment item: ${item.prompt.slice(0, 30)}`}
-                >
-                  Delete
-                </button>
+                <div className={styles.itemActions}>
+                  <button
+                    type="button"
+                    className={styles.btnSecondary}
+                    onClick={() => setScoringItem(item)}
+                    aria-label={`Scores for assessment item: ${item.prompt.slice(0, 30)}`}
+                  >
+                    Scores
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.btnDanger}
+                    onClick={() => void handleDelete(item.id)}
+                    aria-label={`Delete assessment item: ${item.prompt.slice(0, 30)}`}
+                  >
+                    Delete
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -1153,6 +1166,15 @@ function AssessmentItemsPanel({
             taskId={task.id}
             onCancel={() => setShowForm(false)}
             onSaved={handleAdded}
+          />
+        )}
+
+        {scoringItem && (
+          <ScoreOverridePanel
+            challengeId={challengeId}
+            taskId={task.id}
+            item={scoringItem}
+            onClose={() => setScoringItem(null)}
           />
         )}
 
@@ -1171,6 +1193,213 @@ function AssessmentItemsPanel({
             className={styles.btnPrimary}
             onClick={onClose}
           >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Score override (FR-E5)
+// ---------------------------------------------------------------------------
+
+/** 0..1 as a percentage, for reading. The stored value stays a fraction. */
+function scorePercent(score: number): string {
+  return `${Math.round(score * 100)}%`;
+}
+
+/**
+ * Read one item's responses and correct a score by hand (US-19 / FR-E5).
+ *
+ * Modelled on {@link CompletionOverridePanel}, with one deliberate difference: no
+ * reason prompt. FR-D6 requires a reason for a check-in override and an audit row to
+ * put it on; FR-E5 requires neither, and asks only that the score be marked
+ * scored_by "human" — which the row itself records.
+ *
+ * Opened from {@link AssessmentItemsPanel} for either item type. A reflection is the
+ * motivating case, but an admin repairing scores after a bad MCQ answer key is a real
+ * need and the route already answers it.
+ *
+ * Exported for its own test, as {@link CompletionOverridePanel} is: it sits three
+ * modals deep in the builder, and reaching it through the whole tree would test the
+ * path rather than the panel.
+ */
+export function ScoreOverridePanel({
+  challengeId,
+  taskId,
+  item,
+  onClose,
+}: {
+  challengeId: number;
+  taskId: number;
+  item: AssessmentItem;
+  onClose: () => void;
+}) {
+  const [responses, setResponses] = useState<AssessmentResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // The response being edited, and the raw text of the score box. Kept as a string so
+  // a half-typed "0." is not parsed to 0 under the admin's fingers.
+  const [editing, setEditing] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setResponses(await api.listAssessmentResponses(challengeId, taskId, item.id));
+      setError(null);
+    } catch (err) {
+      setError(
+        err instanceof api.ApiError ? err.message : "Could not load responses",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [challengeId, taskId, item.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  function startEditing(response: AssessmentResponse) {
+    setEditing(response.id);
+    setDraft(String(response.score));
+    setError(null);
+  }
+
+  async function handleSave(responseId: number) {
+    const score = Number(draft);
+    if (draft.trim() === "" || Number.isNaN(score)) {
+      setError("Enter a score between 0 and 1.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await api.overrideAssessmentScore(
+        challengeId,
+        taskId,
+        item.id,
+        responseId,
+        { score },
+      );
+      // Patch the one row rather than refetching: the server's echo is the row, and a
+      // reload would scroll a long list back to the top mid-review.
+      setResponses((prev) =>
+        prev.map((r) => (r.id === responseId ? updated : r)),
+      );
+      setEditing(null);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className={styles.overlay}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Scores for ${item.prompt.slice(0, 40)}`}
+    >
+      <div className={`${styles.modal} ${styles.modalWide} ${styles.overridePanel}`}>
+        <h2>Scores — {item.item_type === "mcq" ? "MCQ" : "Reflection"}</h2>
+        <p className={styles.itemPrompt}>{item.prompt}</p>
+        {error && <p className={styles.error}>{error}</p>}
+
+        {loading && <p className={styles.empty}>Loading…</p>}
+
+        {!loading && responses.length === 0 && (
+          <p className={styles.empty}>No one has answered this item yet.</p>
+        )}
+
+        {!loading && responses.length > 0 && (
+          <ul className={styles.itemList} aria-label="Responses">
+            {responses.map((r) => (
+              <li key={r.id} className={styles.assessmentItem}>
+                <div className={styles.itemBody}>
+                  <span className={styles.outcomeBadge}>{r.student_subject}</span>
+                  <span
+                    className={styles.methodBadge}
+                    data-scored-by={r.scored_by}
+                  >
+                    {r.scored_by}
+                  </span>
+
+                  <p className={styles.responseText}>{r.response}</p>
+
+                  {r.ai_feedback && (
+                    // Kept visible after an override: scored_by says the score is not
+                    // the machine's, and this says what the machine had said. With no
+                    // audit table, it is the only trace the override leaves.
+                    <div className={styles.itemMeta}>
+                      Guide feedback: {r.ai_feedback}
+                    </div>
+                  )}
+                </div>
+
+                {editing === r.id ? (
+                  <div className={styles.scoreEditor}>
+                    <label
+                      className={styles.scoreLabel}
+                      htmlFor={`score-${r.id}`}
+                    >
+                      Score (0–1)
+                    </label>
+                    <input
+                      id={`score-${r.id}`}
+                      className={styles.scoreInput}
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={draft}
+                      disabled={saving}
+                      onChange={(e) => setDraft(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className={styles.btnPrimary}
+                      disabled={saving}
+                      onClick={() => void handleSave(r.id)}
+                    >
+                      {saving ? "Saving…" : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.btnSecondary}
+                      disabled={saving}
+                      onClick={() => setEditing(null)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className={styles.scoreEditor}>
+                    <strong className={styles.scoreValue}>
+                      {scorePercent(r.score)}
+                    </strong>
+                    <button
+                      type="button"
+                      className={styles.btnSecondary}
+                      onClick={() => startEditing(r)}
+                      aria-label={`Override score for ${r.student_subject}`}
+                    >
+                      Override
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className={styles.formActions}>
+          <button type="button" className={styles.btnPrimary} onClick={onClose}>
             Done
           </button>
         </div>

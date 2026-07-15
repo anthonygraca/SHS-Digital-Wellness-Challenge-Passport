@@ -11,6 +11,8 @@ import type {
   AssessmentItem,
   AssessmentItemCreate,
   AssessmentItemUpdate,
+  AssessmentResponse,
+  AssessmentScoreOverride,
   CheckIn,
   CheckInAudit,
   CheckInCorrect,
@@ -155,6 +157,34 @@ export function deleteAssessmentItem(
   return request<void>(
     `/${challengeId}/tasks/${taskId}/items/${itemId}`,
     { method: "DELETE" },
+  );
+}
+
+/** Every student response to one assessment item, newest first (FR-E5). */
+export function listAssessmentResponses(
+  challengeId: number,
+  taskId: number,
+  itemId: number,
+): Promise<AssessmentResponse[]> {
+  return request<AssessmentResponse[]>(
+    `/${challengeId}/tasks/${taskId}/items/${itemId}/responses`,
+  );
+}
+
+/**
+ * Adjust one response's score by hand (FR-E5). The server marks it scored_by "human"
+ * and keeps the scorer's feedback — the score is corrected, not the record of it.
+ */
+export function overrideAssessmentScore(
+  challengeId: number,
+  taskId: number,
+  itemId: number,
+  responseId: number,
+  data: AssessmentScoreOverride,
+): Promise<AssessmentResponse> {
+  return request<AssessmentResponse>(
+    `/${challengeId}/tasks/${taskId}/items/${itemId}/responses/${responseId}`,
+    { method: "PATCH", body: JSON.stringify(data) },
   );
 }
 

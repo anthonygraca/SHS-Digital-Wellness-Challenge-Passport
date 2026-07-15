@@ -135,7 +135,20 @@ _DEMO_WEEKS: list[dict] = [
                     "Resting heart rate",
                 ],
                 "answer_key": "A1C",
-            }
+            },
+            {
+                # Shares the MCQ's outcome_tag on purpose: it puts the case the Float
+                # score column exists for into the demo data — an FR-F4 per-outcome mean
+                # averaging an MCQ's 1.0/0.0 against a reflection's fractional score.
+                # It also makes week 3 the one week carrying both item types, which is
+                # the screen the mockup draws.
+                "item_type": "reflection",
+                "prompt": "Which of today's numbers do you most want to change, and "
+                "what is one thing you'll do this month to move it?",
+                "outcome_tag": "know-your-numbers",
+                "rubric": "Names a specific number from the screening. Names a "
+                "specific, doable action. Connects the action to the number.",
+            },
         ],
     },
     {

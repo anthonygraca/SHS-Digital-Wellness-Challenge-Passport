@@ -1,5 +1,6 @@
 /*
- * Knowledge check inside the week sheet (US-18 / FR-E4).
+ * The assessment inside the week sheet — MCQs (US-18 / FR-E4) and reflections
+ * (US-19 / FR-E5).
  *
  * Correct is --wp-tertiary, which is already this app's success colour: completed
  * week tiles and the "Checked in" button both use it, so a right answer reads the
@@ -7,6 +8,10 @@
  * (the submit button, the current selection) and would say "do this" rather than
  * "you got it". Every colour below is a theme token, so a semester re-skin (US-13)
  * carries the quiz with it and no value is hardcoded.
+ *
+ * A reflection score deliberately borrows neither: it is a fraction, not a verdict, so
+ * painting 40% in the failure colour would be this stylesheet inventing a pass mark that
+ * FR-E5 never defines. The score tile stays neutral and states the number.
  */
 
 .section {
@@ -210,6 +215,125 @@
   color: var(--wp-on-error-container);
   font-size: 13px;
   line-height: 1.45;
+}
+
+/* ---------------------------------------------------------------------------
+   Reflection (US-19 / FR-E5)
+   --------------------------------------------------------------------------- */
+
+.textareaLabel {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--wp-on-surface-variant);
+  margin-bottom: 6px;
+}
+
+.textarea {
+  display: block;
+  width: 100%;
+  /* Roughly four lines on a phone: enough that the box invites a paragraph rather
+     than a sentence, without pushing the submit button off a short screen. */
+  min-height: 96px;
+  padding: 12px 14px;
+  border: 1px solid var(--wp-outline-variant);
+  border-radius: 12px;
+  background: var(--wp-surface);
+  color: var(--wp-on-surface);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  /* Vertical only: a horizontally resizable box can be dragged past the viewport on
+     a phone, and there is nothing to gain from a wider one. */
+  resize: vertical;
+}
+
+.textarea:focus-visible {
+  outline: 3px solid var(--wp-primary);
+  outline-offset: 2px;
+}
+
+.textarea:disabled {
+  opacity: 0.6;
+}
+
+.counter {
+  display: block;
+  margin-top: 6px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--wp-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The student's own words, read back on a re-visit. Quoted rather than boxed like an
+   input, so it does not read as still-editable. */
+.written {
+  margin: 0 0 14px;
+  padding-left: 12px;
+  border-left: 3px solid var(--wp-outline-variant);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--wp-on-surface-variant);
+  white-space: pre-wrap;
+  /* A reflection can be up to 4000 characters, and an unbroken URL or a pasted string
+     with no spaces would otherwise widen the card past the viewport. */
+  overflow-wrap: anywhere;
+}
+
+.scoreTile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--wp-surface);
+}
+
+.scoreValue {
+  font-family: var(--wp-font-display);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--wp-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.scoreLabel {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+}
+
+/* --wp-secondary rather than the mockup's --wp-secondary-container, for the reason
+   given above .tag: this app's themes do not define the container tokens. */
+.guide {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--wp-secondary);
+  color: var(--wp-on-secondary);
+}
+
+.guideHeading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.guideBody {
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.guideOutcome {
+  margin-top: 10px;
+  font-size: 12px;
+  opacity: 0.85;
 }
 
 @media (prefers-reduced-motion: reduce) {

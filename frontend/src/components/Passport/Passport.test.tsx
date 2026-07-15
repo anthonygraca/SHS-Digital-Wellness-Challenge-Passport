@@ -46,7 +46,11 @@ vi.mock("../../passport/passport", async (importOriginal) => ({
 // The sheet mounts KnowledgeCheck with its real defaults, so stub the fetch it makes.
 // Defaults to no questions — most weeks have none, and that is the shape every other
 // test in this file assumes. KnowledgeCheck.test.tsx owns the quiz behaviour itself.
-const assessments = vi.hoisted(() => ({ fetchWeekItems: vi.fn(), submitMcq: vi.fn() }));
+const assessments = vi.hoisted(() => ({
+  fetchWeekItems: vi.fn(),
+  submitMcq: vi.fn(),
+  submitReflection: vi.fn(),
+}));
 vi.mock("../../passport/assessments", () => assessments);
 
 beforeEach(() => {

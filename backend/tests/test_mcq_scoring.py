@@ -185,6 +185,7 @@ class TestAnswerKeyIsNotLeaked:
         assert set(item[0]) == {
             "id",
             "weekNo",
+            "itemType",
             "prompt",
             "outcomeTag",
             "options",
@@ -334,41 +335,6 @@ class TestRefusedSubmissions:
 
         resp = client.post(_submit_url(item["id"]), json={"answer": "I sleep well."})
         assert resp.status_code == 400
-
-    def test_reflection_items_are_not_listed(self, client):
-        """US-18 has no way to render or score one, so it does not offer one."""
-        _sign_in_as(client, "staff", ADMIN)
-        challenge = client.post(
-            "/api/challenges",
-            json={
-                "name": "Fall 2025 Wellness",
-                "semester": "Fall 2025",
-                "start_date": "2025-09-01",
-                "end_date": "2025-12-15",
-            },
-        ).json()
-        task = client.post(
-            f"/api/challenges/{challenge['id']}/tasks",
-            json={"title": "Week 1", "required": True},
-        ).json()
-        _add_item(client, challenge["id"], task["id"])
-        _add_item(
-            client,
-            challenge["id"],
-            task["id"],
-            item_type="reflection",
-            prompt="What changed for you?",
-            rubric=RUBRIC,
-            options=None,
-            answer_key=None,
-        )
-        client.post(f"/api/challenges/{challenge['id']}/publish")
-
-        _sign_in_as(client, "student", STUDENT)
-        client.post("/enrollment")
-
-        items = client.get(_items_url(1)).json()
-        assert [i["prompt"] for i in items] == [PROMPT]
 
 
 # ---------------------------------------------------------------------------
