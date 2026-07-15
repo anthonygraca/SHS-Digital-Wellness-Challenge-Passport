@@ -17,7 +17,7 @@ from app.db import get_db
 from app.models import CheckIn, CheckInMethod, Enrollment, Task
 from app.services.ai_tips import AITipsService, get_ai_tips_service
 
-router = APIRouter(prefix="/api/checkins", tags=["checkins"])
+router = APIRouter(prefix="/api/checkins-v2", tags=["checkins"])
 
 
 class CheckInRequest(BaseModel):
@@ -129,7 +129,7 @@ def check_in_to_task(
         return CheckInResponse(
             checkin_id=existing_checkin.id,
             task_title=task.title,
-            checked_in_at=existing_checkin.checked_in_at,
+            checked_in_at=existing_checkin.ts,
             personalized_tip=PersonalizedTipResponse(
                 tip="You've already checked in to this task! Keep up the great work.",
                 resource="Visit Student Health Services for more wellness resources.",
@@ -143,7 +143,7 @@ def check_in_to_task(
         student_id=student_id,
         task_id=request.task_id,
         method=request.method.value,
-        checked_in_at=now,
+        ts=now,
     )
     db.add(checkin)
     db.commit()
@@ -163,7 +163,7 @@ def check_in_to_task(
     return CheckInResponse(
         checkin_id=checkin.id,
         task_title=task.title,
-        checked_in_at=checkin.checked_in_at,
+        checked_in_at=checkin.ts,
         personalized_tip=PersonalizedTipResponse(
             tip=personalized_tip.tip,
             resource=personalized_tip.resource,
@@ -192,7 +192,7 @@ def _calculate_progress(db: Session, student_id: int, challenge_id: int) -> dict
 
     all_tasks = challenge.tasks
     total_tasks = len(all_tasks)
-    required_tasks = [t for t in all_tasks if t.is_required]
+    required_tasks = [t for t in all_tasks if t.required]
     total_required = len(required_tasks)
 
     # Get student's check-ins for this challenge

@@ -8,7 +8,7 @@ import type {
 } from "../types/checkin";
 import { ApiError } from "./challenges";
 
-const BASE = (import.meta.env.VITE_API_BASE ?? "") + "/api/checkins";
+const BASE = (import.meta.env.VITE_API_BASE ?? "") + "/api/checkins-v2";
 
 async function request<T>(
   path: string,

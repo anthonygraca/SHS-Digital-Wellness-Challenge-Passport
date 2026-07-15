@@ -107,7 +107,7 @@ def test_checkin_returns_personalized_tip(client, db_sessionmaker):
 
     # Check in to the task
     resp = client.post(
-        "/api/checkins/",
+        "/api/checkins-v2/",
         json={"task_id": task.id, "method": "event_qr"},
     )
 
@@ -328,7 +328,7 @@ def test_get_progress_endpoint(client, db_sessionmaker):
         _enroll_student(db, student_id, challenge.id)
 
     # Get initial progress
-    resp = client.get(f"/api/checkins/progress/{challenge.id}")
+    resp = client.get(f"/api/checkins-v2/progress/{challenge.id}")
     assert resp.status_code == 200
     progress = resp.json()
 
