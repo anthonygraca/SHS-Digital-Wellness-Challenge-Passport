@@ -157,6 +157,30 @@ export interface CheckIn {
   verified_by: string | null;
 }
 
+/** How a response's score was arrived at. Never "ai" — no scorer here is one. */
+export type ScoredBy = "auto" | "human";
+
+/** One student's scored response to an assessment item, as an admin sees it (FR-E5). */
+export interface AssessmentResponse {
+  id: number;
+  student_id: number;
+  /** The student's SSO subject — the only identifier the Student model stores. */
+  student_subject: string;
+  /** The chosen option for an MCQ; the written reflection otherwise. */
+  response: string;
+  /** 0..1. Fractional for a reflection; 0 or 1 for an MCQ. */
+  score: number;
+  scored_by: ScoredBy;
+  /** The scorer's feedback. Null for every MCQ — that feedback is never stored. */
+  ai_feedback: string | null;
+  ts: string;
+}
+
+/** Set a score by hand (FR-E5). The server marks it scored_by "human". */
+export interface AssessmentScoreOverride {
+  score: number;
+}
+
 export interface ManualCheckInCreate {
   student_subject: string;
   reason: string;

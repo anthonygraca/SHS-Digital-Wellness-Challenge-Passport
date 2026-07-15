@@ -260,10 +260,20 @@ class AssessmentResponse(Base):
     # outcome tag, and US-19's rubric scoring is fractional — one column serves both.
     score: Mapped[float] = mapped_column(Float, nullable=False)
 
-    # "auto" | "human". Always "auto" on this branch; US-19's admin override writes
-    # "human". Present now because the column is NOT NULL and there is no Alembic —
-    # adding it later would mean dropping every existing database.
+    # "auto" | "human". Written "auto" by both scoring paths and "human" by the FR-E5
+    # admin override. Never "ai": no scorer this app has shipped is one, and a column
+    # that claimed otherwise would be the database lying about where a grade came from.
     scored_by: Mapped[str] = mapped_column(String(16), nullable=False, default="auto")
+
+    # The scorer's short feedback for a reflection (US-19 / FR-E5). NULL for every MCQ —
+    # that path's feedback is a pure function of the answer key, composed at read time
+    # and never stored.
+    #
+    # Kept verbatim through a human override. FR-E5 warrants no audit table, so this
+    # field beside scored_by="human" is the only trace an override leaves: scored_by
+    # says the score is not the machine's, and this says what the machine had said.
+    # Nulling it would destroy the only evidence of the thing being overridden.
+    ai_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     ts: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False

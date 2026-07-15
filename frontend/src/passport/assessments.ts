@@ -1,16 +1,20 @@
 import { ApiError } from "../api/challenges";
-import type { KnowledgeCheckItem, McqResult } from "../types/assessment";
+import type {
+  KnowledgeCheckItem,
+  McqResult,
+  ReflectionResult,
+} from "../types/assessment";
 
 // Relative path: proxied to FastAPI in dev (/api → :8000), same-origin in prod.
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 /**
- * The knowledge-check questions on one week, with the student's own answers.
+ * The assessment items on one week — MCQs and reflections — with the student's answers.
  *
  * Returns [] on failure rather than throwing, mirroring {@link fetchPassport}: the
- * quiz is one block inside the week sheet, and a quiz outage should cost the student
- * that block, not the check-in button underneath it. An empty list is also the honest
- * answer for the common case — most weeks carry no knowledge check.
+ * assessment is one block inside the week sheet, and an outage there should cost the
+ * student that block, not the check-in button underneath it. An empty list is also the
+ * honest answer for the common case — most weeks carry no assessment.
  */
 export async function fetchWeekItems(
   weekNo: number,
@@ -57,4 +61,34 @@ export async function submitMcq(
     throw new ApiError(res.status, detail);
   }
   return (await res.json()) as McqResult;
+}
+
+/**
+ * Submit a reflection and get it back scored against its rubric (FR-E5).
+ *
+ * Throws {@link ApiError} carrying the server's message, like {@link submitMcq}. That
+ * matters more here: a 503 means the scorer could not answer and *nothing was stored*,
+ * so the student still has their one attempt — copy the UI must relay verbatim rather
+ * than flatten into "something went wrong".
+ */
+export async function submitReflection(
+  itemId: number,
+  text: string,
+): Promise<ReflectionResult> {
+  const res = await fetch(
+    `${API_BASE}/api/assessments/items/${itemId}/reflections`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    },
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    const detail =
+      typeof body?.detail === "string" ? body.detail : res.statusText;
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as ReflectionResult;
 }
