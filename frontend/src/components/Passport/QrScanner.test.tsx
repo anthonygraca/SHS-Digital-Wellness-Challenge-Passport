@@ -48,6 +48,17 @@ beforeEach(() => {
   camera.scanning = false;
   camera.stopCalls = 0;
   camera.clearCalls = 0;
+  // The component guards on a secure context + camera API before starting; jsdom
+  // exposes neither, so present them here (getUserMedia itself stays stubbed via the
+  // html5-qrcode mock above) so the scanner actually starts.
+  Object.defineProperty(window, "isSecureContext", {
+    value: true,
+    configurable: true,
+  });
+  Object.defineProperty(navigator, "mediaDevices", {
+    value: {},
+    configurable: true,
+  });
 });
 
 describe("QrScanner (US-8)", () => {

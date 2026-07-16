@@ -4,7 +4,6 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy.orm import Session
 
 from app.auth.deps import current_claims
 from app.auth.eligibility import is_current_student
@@ -12,10 +11,9 @@ from app.auth.provider import AuthError, AuthProvider
 from app.auth.registry import get_auth_provider
 from app.auth.session import mint_session_token
 from app.config import get_settings
-from app.db import get_db
+from app.repositories.base import Repository, get_repo
 from app.schemas.session import SessionOut
 from app.services.campus import campus_id_for_issuer
-from app.services.students import get_or_create_student
 
 router = APIRouter()
 
@@ -37,7 +35,7 @@ def login(returnTo: str = "/", provider: AuthProvider = Depends(get_auth_provide
 async def acs(
     request: Request,
     provider: AuthProvider = Depends(get_auth_provider),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """Assertion Consumer Service: validate the IdP callback and open a session.
 
@@ -55,8 +53,7 @@ async def acs(
             _with_status(return_to, "failed"), status_code=status.HTTP_302_FOUND
         )
 
-    student, _created = get_or_create_student(
-        db,
+    student = repo.get_or_create_student(
         campus_id=campus_id,
         sso_subject=assertion.sso_subject,
         affiliation=assertion.affiliation,
@@ -76,6 +73,7 @@ async def acs(
         max_age=settings.jwt_ttl_seconds,
         httponly=True,
         samesite="lax",
+        secure=settings.cookie_secure,
         path="/",
     )
     return response

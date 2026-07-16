@@ -1,0 +1,6 @@
+# Intentionally empty. The Lambda functions get their Python dependencies from the
+# shared layer (backend/layer/requirements.txt via DependenciesLayer in template.yaml),
+# so `sam build` should install nothing into each function — only the app/ source is
+# packaged. For local dev/tests use the package extras instead:
+#   pip install -e 'backend[dev]'        # SQLite path + pytest
+#   pip install -e 'backend[dev,aws]'    # + boto3/mangum/moto for the Dynamo path

@@ -77,6 +77,25 @@ def build_passport(
             ).scalars()
         )
 
+    return assemble_passport(
+        challenge_name=challenge.name,
+        theme=challenge.theme_id,
+        tasks=tasks,
+        completed_ids=completed_ids,
+    )
+
+
+def assemble_passport(
+    *, challenge_name: str, theme: str, tasks: list, completed_ids: set
+) -> PassportView:
+    """Pure derivation of the passport view from a challenge's tasks + completions.
+
+    Backend-agnostic: ``tasks`` is any ordered sequence of objects exposing the
+    task attributes (ORM rows on the SQL path, ``TaskDTO`` on the Dynamo path), and
+    ``completed_ids`` is the set of the student's completed task ids (already scoped
+    to these tasks). Both persistence backends call this so the sequential-unlock and
+    prize-eligibility rules live in exactly one place.
+    """
     weeks: list[WeekView] = []
     available_assigned = False
     for task in tasks:
@@ -115,8 +134,8 @@ def build_passport(
     prize_eligible = required_total > 0 and required_completed == required_total
 
     return PassportView(
-        challenge_name=challenge.name,
-        theme=challenge.theme_id,
+        challenge_name=challenge_name,
+        theme=theme,
         total_weeks=total,
         completed_weeks=completed,
         remaining_weeks=total - completed,
