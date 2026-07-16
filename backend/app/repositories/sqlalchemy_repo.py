@@ -11,6 +11,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.models.challenge import Challenge, Task
+from app.models.student import Student
 from app.schemas.challenge import (
     AssessmentItemUpdate,
     ChallengeCreate,
@@ -22,6 +23,7 @@ from app.schemas.challenge import (
     TaskUpdate,
 )
 from app.services import challenges as challenge_svc
+from app.services import checkins as checkin_svc
 from app.services import enrollment as enrollment_svc
 from app.services import passport as passport_svc
 from app.services import students as student_svc
@@ -118,6 +120,62 @@ class SqlAlchemyRepository:
             self.db, campus_id, sso_subject, affiliation
         )
         return student
+
+    def get_student(self, campus_id: str, sso_subject: str):
+        return student_svc.get_student(self.db, campus_id, sso_subject)
+
+    def get_student_by_id(self, campus_id: str, student_id):
+        student = self.db.get(Student, student_id)
+        if student is None or student.campus_id != campus_id:
+            return None
+        return student
+
+    # --- Manual completion override + audit (FR-D6) -------------------------
+    def get_checkin(self, task_id: int, checkin_id: int):
+        return checkin_svc.get_checkin(self.db, task_id, checkin_id)
+
+    def list_task_checkins(self, task_id: int):
+        return checkin_svc.list_task_checkins(self.db, task_id)
+
+    def list_task_audits(self, task_id: int, student_id=None):
+        return checkin_svc.list_task_audits(self.db, task_id, student_id)
+
+    def create_manual_checkin(
+        self, *, campus_id, task, student, actor_subject, reason, ts=None
+    ):
+        return checkin_svc.create_manual_checkin(
+            self.db,
+            campus_id=campus_id,
+            task=task,
+            student=student,
+            actor_subject=actor_subject,
+            reason=reason,
+            ts=ts,
+        )
+
+    def correct_checkin(
+        self, *, campus_id, checkin, student, actor_subject, reason, method=None, ts=None
+    ):
+        return checkin_svc.correct_checkin(
+            self.db,
+            campus_id=campus_id,
+            checkin=checkin,
+            student=student,
+            actor_subject=actor_subject,
+            reason=reason,
+            method=method,
+            ts=ts,
+        )
+
+    def remove_checkin(self, *, campus_id, checkin, student, actor_subject, reason):
+        checkin_svc.remove_checkin(
+            self.db,
+            campus_id=campus_id,
+            checkin=checkin,
+            student=student,
+            actor_subject=actor_subject,
+            reason=reason,
+        )
 
     # --- Themes -------------------------------------------------------------
     def list_themes(self):

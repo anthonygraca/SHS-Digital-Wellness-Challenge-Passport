@@ -310,7 +310,10 @@ class CheckInOut(BaseModel):
     """
 
     id: int
-    student_id: int
+    # int on the SQL path, "<campus>#<sso>" on the Dynamo path — the seam's declared
+    # StudentId (repositories/base.py). Opaque either way: no UI reads it, and the
+    # admin-facing identifier is student_subject below.
+    student_id: int | str
     student_subject: str
     task_id: int
     ts: datetime
@@ -355,7 +358,8 @@ class CheckInAuditOut(BaseModel):
 
     id: int
     campus_id: str
-    student_id: int
+    # See CheckInOut.student_id — int on SQL, "<campus>#<sso>" on Dynamo.
+    student_id: int | str
     task_id: int
     checkin_id: int | None
     action: str

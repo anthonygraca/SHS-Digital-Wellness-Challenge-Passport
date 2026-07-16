@@ -147,7 +147,11 @@ export type AuditAction = "create" | "update" | "delete";
 
 export interface CheckIn {
   id: number;
-  student_id: number;
+  /**
+   * Opaque: a number on the SQL backend, a "<campus>#<sso>" string on DynamoDB.
+   * Nothing renders it — student_subject below is the admin-facing identifier.
+   */
+  student_id: number | string;
   /** The student's SSO subject — the only identifier the Student model stores. */
   student_subject: string;
   task_id: number;
@@ -201,7 +205,8 @@ export interface CheckInRemove {
 export interface CheckInAudit {
   id: number;
   campus_id: string;
-  student_id: number;
+  /** Opaque — see CheckIn.student_id. */
+  student_id: number | string;
   task_id: number;
   checkin_id: number | null;
   action: AuditAction;

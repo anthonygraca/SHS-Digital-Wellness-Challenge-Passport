@@ -22,9 +22,13 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from app.repositories.dto import (
         AssessmentItemDTO,
         ChallengeDTO,
+        CheckInAuditDTO,
+        CheckInDTO,
         EnrollmentDTO,
         StudentDTO,
         TaskDTO,
@@ -91,6 +95,55 @@ class Repository(Protocol):
     def get_or_create_student(
         self, campus_id: str, sso_subject: str, affiliation: str
     ) -> StudentDTO: ...
+    def get_student(self, campus_id: str, sso_subject: str) -> StudentDTO | None: ...
+    def get_student_by_id(
+        self, campus_id: str, student_id: StudentId
+    ) -> StudentDTO | None: ...
+
+    # --- Manual completion override + audit (FR-D6 / US-27) -----------------
+    #
+    # The load-bearing invariant, inherited from services/checkins.py: every mutator
+    # writes its CheckIn change and its CheckInAudit row ATOMICALLY, so a completion
+    # can never change without leaving a trace. SQL gets that from a single commit;
+    # Dynamo uses TransactWriteItems across the two tables.
+    def get_checkin(self, task_id: int, checkin_id: int) -> CheckInDTO | None: ...
+    def list_task_checkins(self, task_id: int) -> list[tuple[CheckInDTO, StudentDTO]]: ...
+    def list_task_audits(
+        self, task_id: int, student_id: StudentId | None = None
+    ) -> list[CheckInAuditDTO]: ...
+    def create_manual_checkin(
+        self,
+        *,
+        campus_id: str,
+        task: TaskDTO,
+        student: StudentDTO,
+        actor_subject: str,
+        reason: str,
+        ts: datetime | None = None,
+    ) -> CheckInDTO:
+        """Raises ValueError when the student already has a check-in for the task."""
+        ...
+
+    def correct_checkin(
+        self,
+        *,
+        campus_id: str,
+        checkin: CheckInDTO,
+        student: StudentDTO,
+        actor_subject: str,
+        reason: str,
+        method: str | None = None,
+        ts: datetime | None = None,
+    ) -> CheckInDTO: ...
+    def remove_checkin(
+        self,
+        *,
+        campus_id: str,
+        checkin: CheckInDTO,
+        student: StudentDTO,
+        actor_subject: str,
+        reason: str,
+    ) -> None: ...
 
     # --- Themes (global re-skin presets, FR-B4 / US-13) ---------------------
     def list_themes(self) -> list[ThemeDTO]: ...
