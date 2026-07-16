@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth.deps import require_current_student
 from app.repositories.base import Repository, get_repo
 from app.schemas.passport import (
-    CheckInRequest,
     CheckInResult,
     PassportOut,
     ScanCheckInRequest,
@@ -128,30 +127,3 @@ def scan_checkin(
         weekNo=week_no,
         title=title,
     )
-
-
-@router.post("/api/checkins", response_model=PassportOut)
-def create_checkin(
-    payload: CheckInRequest,
-    claims: dict = Depends(require_current_student),
-    repo: Repository = Depends(get_repo),
-):
-    """Record a manual check-in for a week and return the refreshed passport.
-
-    A demo stand-in for the QR scan (US-8) with manual unlock — any week can be
-    completed directly. Idempotent, so re-tapping a completed week is harmless.
-    Gated on current-student eligibility (US-2 / FR-A3), same as the read path.
-    """
-    repo.record_manual_checkin(
-        campus_id=claims["campus_id"],
-        student_id=claims["student_id"],
-        week_no=payload.weekNo,
-    )
-    view = repo.build_passport(
-        campus_id=claims["campus_id"], student_id=claims["student_id"]
-    )
-    if view is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="No active challenge"
-        )
-    return _to_passport_out(view)

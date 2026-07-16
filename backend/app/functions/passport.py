@@ -1,4 +1,4 @@
-"""passport-fn — student passport + check-ins (`/api/passport`, `/api/checkins*`)."""
+"""passport-fn — passport read + QR check-in (`/api/passport`, `/api/checkins/scan`)."""
 
 from __future__ import annotations
 

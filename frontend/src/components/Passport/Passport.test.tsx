@@ -164,49 +164,41 @@ describe("PassportView prize-eligibility indicator (US-7 / FR-C5)", () => {
   });
 });
 
-describe("PassportView check-in (event detail + manual unlock)", () => {
-  it("opens a detail sheet with a check-in button when a tile is clicked", async () => {
-    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+describe("PassportView detail sheet (QR-only check-in)", () => {
+  it("opens a detail sheet whose only check-in action is the QR scanner", async () => {
+    render(<PassportView passport={passportWith(3)} onScan={vi.fn()} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
 
     const sheet = screen.getByRole("dialog");
     expect(within(sheet).getByText("Week 4 Portal")).toBeInTheDocument();
+    // No manual "Check in" button — QR is the only way in.
     expect(
-      within(sheet).getByRole("button", { name: /^check in$/i }),
+      within(sheet).queryByRole("button", { name: /^check in$/i }),
+    ).toBeNull();
+    expect(
+      within(sheet).getByRole("button", { name: /scan qr to check in/i }),
     ).toBeInTheDocument();
   });
 
-  it("checks in the selected week", async () => {
-    const onCheckIn = vi.fn().mockResolvedValue(undefined);
-    render(<PassportView passport={passportWith(3)} onCheckIn={onCheckIn} />);
+  it("opens the scanner (and closes the sheet) from the detail sheet", async () => {
+    render(<PassportView passport={passportWith(3)} onScan={vi.fn()} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
     const sheet = screen.getByRole("dialog");
     await userEvent.click(
-      within(sheet).getByRole("button", { name: /^check in$/i }),
+      within(sheet).getByRole("button", { name: /scan qr to check in/i }),
     );
 
-    expect(onCheckIn).toHaveBeenCalledTimes(1);
-    expect(onCheckIn).toHaveBeenCalledWith(4);
+    // Sheet is gone and the camera scanner (stubbed) is now mounted.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /simulate-scan/i }),
+    ).toBeInTheDocument();
   });
 
-  it("allows manual unlock: a locked week is still tappable and checkable", async () => {
-    const onCheckIn = vi.fn().mockResolvedValue(undefined);
-    render(<PassportView passport={passportWith(3)} onCheckIn={onCheckIn} />);
-
-    // Week 6 is locked, but the tile still opens and offers a check-in.
-    await userEvent.click(screen.getByRole("button", { name: /Week 6:/i }));
-    const sheet = screen.getByRole("dialog");
-    await userEvent.click(
-      within(sheet).getByRole("button", { name: /^check in$/i }),
-    );
-
-    expect(onCheckIn).toHaveBeenCalledWith(6);
-  });
-
-  it("shows a completed week as already checked in (no active check-in)", async () => {
-    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+  it("shows a completed week as already checked in (no check-in action)", async () => {
+    render(<PassportView passport={passportWith(3)} onScan={vi.fn()} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 1:/i }));
     const sheet = screen.getByRole("dialog");
@@ -214,14 +206,14 @@ describe("PassportView check-in (event detail + manual unlock)", () => {
       within(sheet).getByRole("button", { name: /checked in/i }),
     ).toBeDisabled();
     expect(
-      within(sheet).queryByRole("button", { name: /^check in$/i }),
+      within(sheet).queryByRole("button", { name: /scan qr to check in/i }),
     ).toBeNull();
   });
 
   it("renders a task with no date window instead of crashing (US-11 allows it)", async () => {
     const passport = passportWith(3);
     passport.weeks[3] = { ...passport.weeks[3], dateStart: null, dateEnd: null };
-    render(<PassportView passport={passport} onCheckIn={vi.fn()} />);
+    render(<PassportView passport={passport} onScan={vi.fn()} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
     const sheet = screen.getByRole("dialog");
@@ -234,7 +226,7 @@ describe("Passport eligibility gate (US-2 / FR-A3)", () => {
     sessionState.session = asSession({ isCurrentStudent: true });
     const fetchData = vi.fn().mockResolvedValue(passportWith(3));
 
-    render(<Passport fetchData={fetchData} checkInFn={vi.fn()} />);
+    render(<Passport fetchData={fetchData} />);
 
     expect(
       await screen.findByText(/3 of 7 complete, 4 remaining/i),
@@ -249,7 +241,7 @@ describe("Passport eligibility gate (US-2 / FR-A3)", () => {
     });
     const fetchData = vi.fn().mockResolvedValue(passportWith(3));
 
-    render(<Passport fetchData={fetchData} checkInFn={vi.fn()} />);
+    render(<Passport fetchData={fetchData} />);
 
     expect(
       screen.getByRole("heading", { name: /not eligible to join/i }),
@@ -261,7 +253,7 @@ describe("Passport eligibility gate (US-2 / FR-A3)", () => {
 
   it("signed-out visitor is redirected to sign-in", () => {
     sessionState.session = null;
-    render(<Passport fetchData={vi.fn()} checkInFn={vi.fn()} />);
+    render(<Passport fetchData={vi.fn()} />);
     expect(screen.getByText("redirect:/")).toBeInTheDocument();
   });
 });
@@ -356,11 +348,7 @@ describe("Passport container scan wiring (US-8)", () => {
     } satisfies CheckInResult);
 
     render(
-      <Passport
-        fetchData={fetchData}
-        checkInFn={vi.fn()}
-        scanCheckInFn={scanCheckInFn}
-      />,
+      <Passport fetchData={fetchData} scanCheckInFn={scanCheckInFn} />,
     );
 
     expect(
