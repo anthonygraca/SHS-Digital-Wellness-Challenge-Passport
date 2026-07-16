@@ -114,11 +114,8 @@ Resources:
           Properties:
             Path: /api/passport
             Method: ANY
-        Checkins:
-          Type: HttpApi
-          Properties:
-            Path: /api/checkins
-            Method: ANY
+        # Scanning an event QR is the only way to check in — there is deliberately
+        # no manual /api/checkins route to bypass it.
         CheckinScan:
           Type: HttpApi
           Properties:
