@@ -1,12 +1,13 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  SHS Digital Wellness Passport — serverless backend. Per-route Lambda functions
-  (auth / bootstrap / enrollment / passport / challenges / assessments / themes /
-  guide) + a health probe, behind one API Gateway HTTP API ($default stage), backed
-  by one DynamoDB table per entity. This HTTP API is the API-origin for the
-  CloudFront distribution built in docs/cloudfront-deploy-guide.md (everything stays
-  same-origin).
+  SHS Digital Wellness Passport — serverless full stack. Per-route Lambda functions
+  (auth / bootstrap / enrollment / passport / challenges / assessments / reports /
+  themes / guide) + a health probe, behind one API Gateway HTTP API ($default stage),
+  backed by one DynamoDB table per entity — all fronted by a CloudFront distribution
+  that also serves the SPA from a private S3 bucket, so the app and the API share one
+  origin (docs/cloudfront-deploy-guide.md explains the distribution these resources
+  provision).
 
 Parameters:
   TablePrefix:
@@ -603,12 +604,173 @@ Resources:
         - AttributeName: id
           KeyType: HASH
 
+  # --- CDN + static hosting -------------------------------------------------
+  # One public HTTPS domain in front of everything, so the SPA and the API are
+  # same-origin (no CORS, cookies just work). This replaces the by-hand Console
+  # click-through that docs/cloudfront-deploy-guide.md used to describe — the guide
+  # now documents what these resources provision. Deploying the backend stack updates
+  # the distribution too, which adds a few minutes to a deploy; that is the price of
+  # the distribution being code rather than console state.
+
+  # Private bucket for the built SPA. Public access fully blocked — CloudFront reaches
+  # it through the OAC below, nothing reaches it directly. Auto-named: bucket names are
+  # globally unique, and a fixed name would make the stack un-recreatable.
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  # Grants read to *only this distribution*, scoped by its ARN — the policy CloudFront
+  # would otherwise hand you to paste into the Console.
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  FrontendOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-frontend-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Rewrites an extensionless request (a client-side route like /passport) to the SPA
+  # shell, on the S3 behaviors only. Deliberately NOT a custom-error-response 404->/
+  # rule: that would also rewrite a real API 404 into index.html with a 200, and the
+  # frontend's res.ok check would then choke on HTML (frontend/vite.config.ts).
+  SpaRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "${AWS::StackName}-spa-rewrite"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Rewrite extensionless requests to the SPA shell (S3 behaviors only).
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request, uri = request.uri;
+          var last = uri.substring(uri.lastIndexOf('/') + 1);
+          if (last.indexOf('.') === -1) { request.uri = '/index.html'; }
+          return request;
+        }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${AWS::StackName} — SPA + API single origin"
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        # NA + EU edges only: this serves one US campus, so the cheapest class is right.
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: s3-frontend
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt FrontendOAC.Id
+            # OAC replaces the legacy OAI, so this is deliberately empty.
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+          - Id: api-gateway
+            # Host only, no https:// and no path — the API uses the $default stage, so
+            # /api/passport must reach it unchanged.
+            DomainName: !Sub "${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+        # The SPA: static, cacheable, and extensionless routes fall back to the shell.
+        DefaultCacheBehavior:
+          TargetOriginId: s3-frontend
+          ViewerProtocolPolicy: redirect-to-https
+          # AWS-managed CachingOptimized. These managed-policy ids are global constants
+          # (identical in every account/region); confirm with `aws cloudfront
+          # list-cache-policies` if ever in doubt.
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SpaRewriteFunction.FunctionARN
+        # First match wins, so order is load-bearing: /auth/callback (a client route)
+        # must be caught by S3 before the /auth/* rule sends it to the API.
+        CacheBehaviors:
+          - PathPattern: /auth/callback
+            TargetOriginId: s3-frontend
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt SpaRewriteFunction.FunctionARN
+          - PathPattern: /api/*
+            TargetOriginId: api-gateway
+            ViewerProtocolPolicy: redirect-to-https
+            # CachingDisabled — API responses are per-user, never cached.
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            # AllViewerExceptHostHeader — forwards cookies + query strings but NOT the
+            # Host header, which API Gateway would reject as a mismatch (403).
+            OriginRequestPolicyId: b689b0a8-53d0-4d0f-b391-8a4b8b5a4b4b
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachedMethods: [GET, HEAD]
+          - PathPattern: /auth/*
+            TargetOriginId: api-gateway
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-4d0f-b391-8a4b8b5a4b4b
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachedMethods: [GET, HEAD]
+          - PathPattern: /enrollment*
+            TargetOriginId: api-gateway
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-4d0f-b391-8a4b8b5a4b4b
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachedMethods: [GET, HEAD]
+          # Only needed while the mock IdP is in use; drop it for a real SAML provider.
+          - PathPattern: /mock-idp*
+            TargetOriginId: api-gateway
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-4d0f-b391-8a4b8b5a4b4b
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachedMethods: [GET, HEAD]
+
 Outputs:
   HttpApiUrl:
-    Description: >
-      Base URL of the HTTP API. Use its host as the second CloudFront origin
-      (docs/cloudfront-deploy-guide.md step 5).
+    Description: Base URL of the HTTP API (the CloudFront distribution's API origin).
     Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
   HttpApiId:
     Description: HTTP API id (the {apiId} in the execute-api origin domain).
     Value: !Ref ServerlessHttpApi
+  FrontendBucket:
+    Description: S3 bucket for the built SPA — the <bucket> arg to deploy-frontend.sh.
+    Value: !Ref FrontendBucket
+  DistributionId:
+    Description: CloudFront distribution id — the <dist-id> arg to deploy-frontend.sh.
+    Value: !Ref Distribution
+  DistributionDomain:
+    Description: The one public URL of the app.
+    Value: !GetAtt Distribution.DomainName
