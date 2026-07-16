@@ -514,8 +514,8 @@ def list_checkin_audits(
 # ---------------------------------------------------------------------------
 
 
-def _get_response_or_404(db: Session, item_id: int, response_id: int):
-    response = assessment_svc.get_item_response(db, item_id, response_id)
+def _get_response_or_404(repo: Repository, item_id: int, response_id: int):
+    response = assessment_svc.get_item_response(repo, item_id, response_id)
     if response is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Response not found"
@@ -547,7 +547,6 @@ def list_item_responses(
     item_id: int,
     claims: dict = Depends(require_admin),
     repo: Repository = Depends(get_repo),
-    db: Session = Depends(get_db),
 ):
     """Every student response to one assessment item, newest first (FR-E5).
 
@@ -561,7 +560,7 @@ def list_item_responses(
 
     return [
         _response_out(response, student)
-        for response, student in assessment_svc.list_item_responses(db, item_id)
+        for response, student in assessment_svc.list_item_responses(repo, item_id)
     ]
 
 
@@ -577,7 +576,6 @@ def override_response_score(
     body: AssessmentScoreOverride,
     claims: dict = Depends(require_admin),
     repo: Repository = Depends(get_repo),
-    db: Session = Depends(get_db),
 ):
     """Adjust a score by hand, marking it scored_by "human" (US-19 / FR-E5).
 
@@ -594,8 +592,8 @@ def override_response_score(
     _get_challenge_or_404(repo, campus_id, challenge_id)
     _get_task_or_404(repo, challenge_id, task_id)
     _get_item_or_404(repo, task_id, item_id)
-    response = _get_response_or_404(db, item_id, response_id)
+    response = _get_response_or_404(repo, item_id, response_id)
     student = _get_student_or_404_by_id(repo, campus_id, response.student_id)
 
-    updated = assessment_svc.override_response_score(db, response, body.score)
+    updated = assessment_svc.override_response_score(repo, response, body.score)
     return _response_out(updated, student)

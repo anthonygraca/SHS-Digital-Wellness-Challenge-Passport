@@ -83,6 +83,18 @@ class StudentDTO:
 
 
 @dataclass
+class AssessmentResponseDTO:
+    id: int
+    student_id: int | str
+    assessment_item_id: int
+    response: str
+    score: float
+    scored_by: str
+    ai_feedback: str | None
+    ts: datetime
+
+
+@dataclass
 class CheckInDTO:
     id: int
     student_id: int | str

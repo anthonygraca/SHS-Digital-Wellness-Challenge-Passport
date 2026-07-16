@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from app.repositories.dto import (
         AssessmentItemDTO,
+        AssessmentResponseDTO,
         ChallengeDTO,
         CheckInAuditDTO,
         CheckInDTO,
@@ -144,6 +145,56 @@ class Repository(Protocol):
         actor_subject: str,
         reason: str,
     ) -> None: ...
+
+    # --- Assessments + engagement (FR-E4/E5, US-23) -------------------------
+    #
+    # Data access only. The scoring rules — which answer is correct, what a score may
+    # be, which refusal wins — stay in services/assessments.py, which takes a Repository
+    # and so runs unchanged on either backend. Duplicating those rules per backend is
+    # exactly the drift this seam exists to prevent.
+    def get_task_by_position(
+        self, challenge_id: int, position: int
+    ) -> TaskDTO | None: ...
+    def get_item_in_challenge(
+        self, challenge_id: int, item_id: int
+    ) -> AssessmentItemDTO | None: ...
+    def get_response(
+        self, student_id: StudentId, item_id: int
+    ) -> AssessmentResponseDTO | None: ...
+    def get_responses_for_items(
+        self, student_id: StudentId, item_ids: list[int]
+    ) -> dict[int, AssessmentResponseDTO]: ...
+    def create_response(
+        self,
+        *,
+        student_id: StudentId,
+        item: AssessmentItemDTO,
+        challenge_id: int,
+        response: str,
+        score: float,
+        scored_by: str,
+        ai_feedback: str | None = None,
+    ) -> AssessmentResponseDTO | None:
+        """Returns None if the student already answered — one attempt per item. The
+        conditional/constrained write, not the caller's pre-check, is the arbiter."""
+        ...
+
+    def list_item_responses(
+        self, item_id: int
+    ) -> list[tuple[AssessmentResponseDTO, StudentDTO]]: ...
+    def get_item_response(
+        self, item_id: int, response_id: int
+    ) -> AssessmentResponseDTO | None: ...
+    def override_response_score(
+        self, response: AssessmentResponseDTO, score: float
+    ) -> AssessmentResponseDTO: ...
+    def record_content_view(
+        self, *, student_id: StudentId, task: TaskDTO, content_ref: str
+    ) -> None: ...
+    def count_content_views(self, challenge_id: int) -> dict[str, int]:
+        """content_ref -> number of views. Views, not viewers: re-reading a week is
+        engagement, which is why nothing dedupes here (models/engagement.py)."""
+        ...
 
     # --- Themes (global re-skin presets, FR-B4 / US-13) ---------------------
     def list_themes(self) -> list[ThemeDTO]: ...

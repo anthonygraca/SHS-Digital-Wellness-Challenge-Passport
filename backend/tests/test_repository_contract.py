@@ -249,6 +249,218 @@ def test_completed_tasks_are_scoped_to_the_student(repo):
     assert [w.status for w in alice_view.weeks] == ["complete"]
 
 
+# --- assessments (FR-E4 / FR-E5) --------------------------------------------
+def _mcq(repo, task_id, tag="vision-care"):
+    return repo.add_item(
+        task_id,
+        MCQCreate(
+            item_type="mcq",
+            prompt="How often?",
+            outcome_tag=tag,
+            options=["yearly", "never"],
+            answer_key="yearly",
+        ),
+    )
+
+
+def test_a_fractional_score_round_trips_as_a_float(repo):
+    """The reflection rubric scores fractionally, and boto3 refuses Python floats.
+
+    Without the float -> Decimal encoding this is a hard 500 on the first reflection
+    ever scored in production ("Float types are not supported. Use Decimal types
+    instead"), and reading it back as Decimal rather than float would quietly change
+    the type the FR-F4 mean is computed from.
+    """
+    ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    item = _mcq(repo, t1.id)
+    stu = _student(repo)
+
+    stored = repo.create_response(
+        student_id=stu.id,
+        item=item,
+        challenge_id=ch.id,
+        response="yearly",
+        score=0.6,
+        scored_by="auto",
+        ai_feedback="Good, but say why.",
+    )
+    assert stored.score == 0.6
+
+    read_back = repo.get_response(stu.id, item.id)
+    assert read_back.score == 0.6
+    assert isinstance(read_back.score, float)
+    assert read_back.ai_feedback == "Good, but say why."
+
+
+def test_a_response_is_one_attempt(repo):
+    ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    item = _mcq(repo, t1.id)
+    stu = _student(repo)
+    args = dict(
+        student_id=stu.id,
+        item=item,
+        challenge_id=ch.id,
+        response="yearly",
+        score=1.0,
+        scored_by="auto",
+    )
+    assert repo.create_response(**args) is not None
+    # The write itself is the arbiter — a second attempt is refused, not overwritten.
+    assert repo.create_response(**{**args, "response": "never", "score": 0.0}) is None
+    assert repo.get_response(stu.id, item.id).response == "yearly"
+
+
+def test_responses_are_scoped_to_the_student(repo):
+    ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    item = _mcq(repo, t1.id)
+    alice = _student(repo, "alice@csub.edu")
+    bob = _student(repo, "bob@csub.edu")
+    repo.create_response(
+        student_id=alice.id,
+        item=item,
+        challenge_id=ch.id,
+        response="yearly",
+        score=1.0,
+        scored_by="auto",
+    )
+    assert repo.get_response(bob.id, item.id) is None
+    # Bob may still answer the same item.
+    assert (
+        repo.create_response(
+            student_id=bob.id,
+            item=item,
+            challenge_id=ch.id,
+            response="never",
+            score=0.0,
+            scored_by="auto",
+        )
+        is not None
+    )
+
+
+def test_get_responses_for_items_maps_by_item(repo):
+    ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    a = _mcq(repo, t1.id, tag="one")
+    b = _mcq(repo, t1.id, tag="two")
+    stu = _student(repo)
+    repo.create_response(
+        student_id=stu.id,
+        item=a,
+        challenge_id=ch.id,
+        response="yearly",
+        score=1.0,
+        scored_by="auto",
+    )
+
+    got = repo.get_responses_for_items(stu.id, [a.id, b.id])
+    assert set(got) == {a.id}  # only the answered one
+    assert got[a.id].score == 1.0
+    assert repo.get_responses_for_items(stu.id, []) == {}
+
+
+def test_get_task_by_position_and_item_challenge_scoping(repo):
+    ch, (t1, t2) = _built_challenge(repo)
+    assert repo.get_task_by_position(ch.id, 1).id == t1.id
+    assert repo.get_task_by_position(ch.id, 2).id == t2.id
+    assert repo.get_task_by_position(ch.id, 99) is None
+
+    item = _mcq(repo, t1.id)
+    assert repo.get_item_in_challenge(ch.id, item.id).id == item.id
+    # An item id from another challenge is indistinguishable from one that never was.
+    other = _challenge(repo, name="Other", semester="S2", publish=False)
+    assert repo.get_item_in_challenge(other.id, item.id) is None
+
+
+def test_list_item_responses_pairs_with_its_student(repo):
+    ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    item = _mcq(repo, t1.id)
+    alice = _student(repo, "alice@csub.edu")
+    bob = _student(repo, "bob@csub.edu")
+    for s, ans in ((alice, "yearly"), (bob, "never")):
+        repo.create_response(
+            student_id=s.id,
+            item=item,
+            challenge_id=ch.id,
+            response=ans,
+            score=1.0 if ans == "yearly" else 0.0,
+            scored_by="auto",
+        )
+
+    pairs = repo.list_item_responses(item.id)
+    assert len(pairs) == 2
+    assert {st.sso_subject for _r, st in pairs} == {"alice@csub.edu", "bob@csub.edu"}
+    for r, st in pairs:
+        assert r.student_id == st.id
+
+
+def test_get_item_response_is_scoped_to_its_item(repo):
+    ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    a = _mcq(repo, t1.id, tag="one")
+    b = _mcq(repo, t1.id, tag="two")
+    stu = _student(repo)
+    resp = repo.create_response(
+        student_id=stu.id,
+        item=a,
+        challenge_id=ch.id,
+        response="yearly",
+        score=1.0,
+        scored_by="auto",
+    )
+    assert repo.get_item_response(a.id, resp.id).id == resp.id
+    # A response id from another item is a 404, not an override on the wrong question.
+    assert repo.get_item_response(b.id, resp.id) is None
+
+
+def test_override_sets_a_human_score_and_keeps_the_feedback(repo):
+    ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    item = _mcq(repo, t1.id)
+    stu = _student(repo)
+    resp = repo.create_response(
+        student_id=stu.id,
+        item=item,
+        challenge_id=ch.id,
+        response="never",
+        score=0.0,
+        scored_by="auto",
+        ai_feedback="The machine said this.",
+    )
+
+    updated = repo.override_response_score(resp, 0.75)
+    assert updated.score == 0.75
+    assert updated.scored_by == "human"
+    # The feedback is the only record of what was overridden — never cleared.
+    assert updated.ai_feedback == "The machine said this."
+
+    stored = repo.get_response(stu.id, item.id)
+    assert stored.score == 0.75
+    assert stored.scored_by == "human"
+    assert stored.ai_feedback == "The machine said this."
+
+
+# --- content views (FR-F3 / US-23) ------------------------------------------
+def test_content_views_count_views_not_viewers(repo):
+    ch, (t1, t2) = _built_challenge(repo)
+    stu = _student(repo)
+    assert repo.count_content_views(ch.id) == {}
+
+    repo.record_content_view(student_id=stu.id, task=t1, content_ref="week_detail")
+    # The same student re-reading the same week counts again: no unique constraint,
+    # deliberately — re-reading is engagement, not a duplicate.
+    repo.record_content_view(student_id=stu.id, task=t1, content_ref="week_detail")
+    repo.record_content_view(student_id=stu.id, task=t2, content_ref="tip")
+
+    assert repo.count_content_views(ch.id) == {"week_detail": 2, "tip": 1}
+
+
+def test_content_views_are_scoped_to_their_challenge(repo):
+    ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    stu = _student(repo)
+    repo.record_content_view(student_id=stu.id, task=t1, content_ref="week_detail")
+
+    other = _challenge(repo, name="Other", semester="S2", publish=False)
+    assert repo.count_content_views(other.id) == {}
+
+
 # --- manual completion override + audit (FR-D6 / US-27) ---------------------
 def test_manual_checkin_writes_the_checkin_and_its_audit_row(repo):
     _ch, (t1,) = _built_challenge(repo, titles=("Week 1",))

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 
 from app.auth.deps import require_current_student
-from app.db import get_db
 from app.repositories.base import Repository, get_repo
 from app.schemas.engagement import ContentViewCreate
 from app.schemas.passport import (
@@ -110,7 +108,6 @@ def scan_checkin(
     payload: ScanCheckInRequest,
     claims: dict = Depends(require_current_student),
     repo: Repository = Depends(get_repo),
-    db: Session = Depends(get_db),
 ):
     """Record an event-QR check-in from a scanned token — the UC-3 core loop (US-8).
 
@@ -149,7 +146,7 @@ def scan_checkin(
     # check-in is gone (#98, QR-only) — so "tip" counts tips shown, which is exactly
     # the count of successful scans.
     engagement_svc.record_content_view_for_task(
-        db, student_id=student_id, task=task, content_ref="tip"
+        repo, student_id=student_id, task=task, content_ref="tip"
     )
 
     return CheckInResult(
@@ -164,7 +161,7 @@ def scan_checkin(
 def create_content_view(
     payload: ContentViewCreate,
     claims: dict = Depends(require_current_student),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """Record that the student looked at a week's content (FR-F3 / US-23).
 
@@ -182,12 +179,12 @@ def create_content_view(
     204 rather than the refreshed passport: nothing about the student's progress
     changed, and the client fires this without waiting for the answer.
     """
-    view = engagement_svc.record_content_view(
-        db,
+    recorded = engagement_svc.record_content_view(
+        repo,
         campus_id=claims["campus_id"],
         student_id=claims["student_id"],
         week_no=payload.weekNo,
         content_ref=payload.contentRef,
     )
-    if view is None:
+    if not recorded:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such week")

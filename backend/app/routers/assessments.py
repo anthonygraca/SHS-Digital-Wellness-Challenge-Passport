@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 
 from app.auth.deps import require_current_student
-from app.db import get_db
+from app.repositories.base import Repository, get_repo
 from app.schemas.assessment import (
     KnowledgeCheckItemOut,
     McqResultOut,
@@ -108,7 +107,7 @@ def _to_result_out(scored: ScoredResponse) -> McqResultOut:
 def get_week_items(
     week_no: int,
     claims: dict = Depends(require_current_student),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """The knowledge-check questions on one week, with the student's own answers.
 
@@ -119,7 +118,7 @@ def get_week_items(
     the week simply has no knowledge check.
     """
     views = list_week_items(
-        db,
+        repo,
         campus_id=claims["campus_id"],
         student_id=claims["student_id"],
         week_no=week_no,
@@ -140,7 +139,7 @@ def submit_mcq(
     item_id: int,
     payload: McqSubmit,
     claims: dict = Depends(require_current_student),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """Auto-score an MCQ answer instantly and store it (US-18 / FR-E4).
 
@@ -152,7 +151,7 @@ def submit_mcq(
     """
     try:
         scored = score_mcq(
-            db,
+            repo,
             campus_id=claims["campus_id"],
             student_id=claims["student_id"],
             item_id=item_id,
@@ -197,7 +196,7 @@ def submit_reflection(
     item_id: int,
     payload: ReflectionSubmit,
     claims: dict = Depends(require_current_student),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
     scorer: ReflectionScorer = Depends(get_reflection_scorer),
 ):
     """Score a free-text reflection against its rubric and store it (US-19 / FR-E5).
@@ -215,7 +214,7 @@ def submit_reflection(
     """
     try:
         scored = score_reflection(
-            db,
+            repo,
             campus_id=claims["campus_id"],
             student_id=claims["student_id"],
             item_id=item_id,

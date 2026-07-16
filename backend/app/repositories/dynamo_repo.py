@@ -37,6 +37,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
@@ -44,6 +45,7 @@ from boto3.dynamodb.conditions import Attr, Key
 from app.config import get_settings
 from app.repositories.dto import (
     AssessmentItemDTO,
+    AssessmentResponseDTO,
     ChallengeDTO,
     CheckInAuditDTO,
     CheckInDTO,
@@ -79,11 +81,21 @@ def _now() -> datetime:
 
 
 def _enc(value: Any) -> Any:
-    """Encode a Python value for a DynamoDB attribute (dates -> ISO strings)."""
+    """Encode a Python value for a DynamoDB attribute.
+
+    datetimes/dates -> ISO strings; floats -> Decimal, because boto3 refuses a Python
+    float outright ("Float types are not supported. Use Decimal types instead"), and
+    AssessmentResponse.score is one. ``Decimal(str(x))`` rather than ``Decimal(x)``:
+    the latter carries the binary float's noise (0.1 -> 0.1000000000000000055...) into
+    the stored value, so a score would come back subtly different from the one scored.
+    """
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, date):
         return value.isoformat()
+    # bool is an int subclass, not a float, so it is unaffected by this branch.
+    if isinstance(value, float):
+        return Decimal(str(value))
     return value
 
 
@@ -94,6 +106,11 @@ def _prune(item: dict) -> dict:
 
 def _int(value: Any) -> int:
     return int(value) if isinstance(value, Decimal) else int(value)
+
+
+def _float(value: Any) -> float | None:
+    """Read a number back as a float — DynamoDB hands every number back as Decimal."""
+    return float(value) if value is not None else None
 
 
 def _date(value: Any) -> date | None:
@@ -113,6 +130,8 @@ _TABLE_SUFFIXES = {
     "enrollments": "Enrollments",
     "checkins": "CheckIns",
     "audits": "CheckInAudits",
+    "responses": "AssessmentResponses",
+    "views": "ContentViews",
     "counters": "Counters",
     "themes": "Themes",
 }
@@ -165,6 +184,8 @@ class DynamoRepository:
         self.enrollments = t["enrollments"]
         self.checkins = t["checkins"]
         self.audits = t["audits"]
+        self.responses = t["responses"]
+        self.views = t["views"]
         self.counters = t["counters"]
         self.themes = t["themes"]
 
@@ -618,6 +639,182 @@ class DynamoRepository:
         if raw is None or raw.get("campus_id") != campus_id:
             return None
         return self._student_dto(raw)
+
+    # --- Assessments + engagement (FR-E4/E5, US-23) -------------------------
+    @staticmethod
+    def _response_dto(raw: dict) -> AssessmentResponseDTO:
+        return AssessmentResponseDTO(
+            id=_int(raw["id"]),
+            student_id=raw["student_id"],
+            assessment_item_id=_int(raw["assessment_item_id"]),
+            response=raw["response"],
+            score=_float(raw.get("score")),
+            scored_by=raw["scored_by"],
+            ai_feedback=raw.get("ai_feedback"),
+            ts=_dt(raw.get("ts")),
+        )
+
+    def get_task_by_position(self, challenge_id: int, position: int) -> TaskDTO | None:
+        rows = self._query_all(
+            self.tasks,
+            IndexName="ByChallenge",
+            KeyConditionExpression=Key("challenge_id").eq(challenge_id)
+            & Key("position").eq(position),
+        )
+        # .first(), like the SQL side: positions are kept gapless and unique by the
+        # reorder service but no constraint enforces it, and a duplicate must not 500.
+        return self._task_dto(rows[0]) if rows else None
+
+    def get_item_in_challenge(self, challenge_id: int, item_id: int):
+        raw = self.items.get_item(Key={"id": item_id}).get("Item")
+        # challenge_id is denormalized onto the item, so scoping it to the challenge is
+        # a comparison rather than the SQL path's join through Task.
+        if raw is None or _int(raw.get("challenge_id", 0)) != challenge_id:
+            return None
+        return self._item_dto(raw)
+
+    def get_response(self, student_id, item_id: int):
+        raw = self.responses.get_item(
+            Key={"student_id": student_id, "assessment_item_id": item_id}
+        ).get("Item")
+        return self._response_dto(raw) if raw else None
+
+    def get_responses_for_items(self, student_id, item_ids: list[int]):
+        if not item_ids:
+            return {}
+        found: dict[int, AssessmentResponseDTO] = {}
+        # The keys are known — this week's items — so this is a BatchGetItem rather
+        # than the SQL path's IN-clause query.
+        keys = [{"student_id": student_id, "assessment_item_id": i} for i in item_ids]
+        for start in range(0, len(keys), 100):
+            resp = self.responses.meta.client.batch_get_item(
+                RequestItems={self.responses.name: {"Keys": keys[start : start + 100]}}
+            )
+            for r in resp["Responses"].get(self.responses.name, []):
+                found[_int(r["assessment_item_id"])] = self._response_dto(r)
+        return found
+
+    def create_response(
+        self,
+        *,
+        student_id,
+        item,
+        challenge_id: int,
+        response: str,
+        score: float,
+        scored_by: str,
+        ai_feedback: str | None = None,
+    ) -> AssessmentResponseDTO | None:
+        raw = _prune(
+            {
+                "student_id": student_id,
+                "assessment_item_id": item.id,
+                "id": self._next_id("response"),
+                # Denormalized for the ByChallenge index the outcome report reads.
+                "challenge_id": challenge_id,
+                "response": response,
+                # _enc turns the float into a Decimal — boto3 refuses floats outright.
+                "score": _enc(score),
+                "scored_by": scored_by,
+                "ai_feedback": ai_feedback,
+                "ts": _enc(_now()),
+            }
+        )
+        try:
+            # The key IS uq_response_student_item, so the one-attempt rule is the write
+            # itself: race-safe, where a read-then-write would not be.
+            self.responses.put_item(
+                Item=raw, ConditionExpression="attribute_not_exists(student_id)"
+            )
+        except self.responses.meta.client.exceptions.ConditionalCheckFailedException:
+            return None
+        return self._response_dto(raw)
+
+    def _responses_for_item(self, item_id: int) -> list[dict]:
+        return self._query_all(
+            self.responses,
+            IndexName="ByItem",
+            KeyConditionExpression=Key("assessment_item_id").eq(item_id),
+            ScanIndexForward=False,  # ts DESC, as the SQL query orders
+        )
+
+    def list_item_responses(self, item_id: int):
+        rows = self._responses_for_item(item_id)
+        if not rows:
+            return []
+        ids = list({r["student_id"] for r in rows})
+        found: dict[str, StudentDTO] = {}
+        for start in range(0, len(ids), 100):
+            resp = self.students.meta.client.batch_get_item(
+                RequestItems={
+                    self.students.name: {
+                        "Keys": [{"student_id": s} for s in ids[start : start + 100]]
+                    }
+                }
+            )
+            for s in resp["Responses"].get(self.students.name, []):
+                found[s["student_id"]] = self._student_dto(s)
+        return [
+            (self._response_dto(r), found[r["student_id"]])
+            for r in rows
+            if r["student_id"] in found
+        ]
+
+    def get_item_response(self, item_id: int, response_id: int):
+        # Filter on the exposed int id over one item's responses (~200, admin path) —
+        # the same trade as get_checkin, and no extra index to maintain.
+        for raw in self._responses_for_item(item_id):
+            if _int(raw.get("id", 0)) == response_id:
+                return self._response_dto(raw)
+        return None
+
+    def override_response_score(self, response, score: float):
+        self.responses.update_item(
+            Key={
+                "student_id": response.student_id,
+                "assessment_item_id": response.assessment_item_id,
+            },
+            UpdateExpression="SET score = :s, scored_by = :b",
+            ExpressionAttributeValues={":s": _enc(score), ":b": "human"},
+        )
+        # ai_feedback is deliberately untouched — see the service's docstring.
+        return AssessmentResponseDTO(
+            id=response.id,
+            student_id=response.student_id,
+            assessment_item_id=response.assessment_item_id,
+            response=response.response,
+            score=score,
+            scored_by="human",
+            ai_feedback=response.ai_feedback,
+            ts=response.ts,
+        )
+
+    def record_content_view(self, *, student_id, task, content_ref: str) -> None:
+        ts = _now()
+        self.views.put_item(
+            Item={
+                "challenge_id": task.challenge_id,
+                # The uuid suffix is what implements "no unique constraint": a week can
+                # only be completed once but read any number of times, and re-reading is
+                # engagement rather than a duplicate to collapse (models/engagement.py).
+                "view_id": f"{ts.isoformat()}#{uuid4().hex[:8]}",
+                "student_id": student_id,
+                "task_id": task.id,
+                "content_ref": content_ref,
+                "ts": _enc(ts),
+            }
+        )
+
+    def count_content_views(self, challenge_id: int) -> dict[str, int]:
+        # Partitioned by challenge, so this is one query — no fan-out. The biggest read
+        # in the app (views, not viewers), which _query_all paginates if it needs to.
+        counts: dict[str, int] = {}
+        for raw in self._query_all(
+            self.views, KeyConditionExpression=Key("challenge_id").eq(challenge_id)
+        ):
+            ref = raw["content_ref"]
+            counts[ref] = counts.get(ref, 0) + 1
+        return counts
 
     # --- Manual completion override + audit (FR-D6 / US-27) -----------------
     @staticmethod

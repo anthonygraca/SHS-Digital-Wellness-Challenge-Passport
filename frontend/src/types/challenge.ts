@@ -167,7 +167,8 @@ export type ScoredBy = "auto" | "human";
 /** One student's scored response to an assessment item, as an admin sees it (FR-E5). */
 export interface AssessmentResponse {
   id: number;
-  student_id: number;
+  /** Opaque — see CheckIn.student_id. */
+  student_id: number | string;
   /** The student's SSO subject — the only identifier the Student model stores. */
   student_subject: string;
   /** The chosen option for an MCQ; the written reflection otherwise. */
