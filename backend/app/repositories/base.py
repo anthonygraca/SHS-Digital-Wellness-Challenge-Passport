@@ -96,7 +96,11 @@ class Repository(Protocol):
     ) -> PassportView | None: ...
     def record_event_qr_checkin(
         self, campus_id: str, student_id: StudentId, token: str
-    ) -> TaskDTO: ...
+    ) -> tuple[TaskDTO, PassportView]:
+        """Record an event-QR check-in and return the completed task plus the refreshed
+        passport. Returning both lets the caller avoid a second active-challenge lookup
+        for the passport; raises InvalidEventToken / DuplicateCheckIn on failure."""
+        ...
 
 
 def get_repo() -> Iterator[Repository]:

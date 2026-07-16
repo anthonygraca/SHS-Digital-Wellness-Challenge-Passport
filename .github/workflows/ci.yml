@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # No branch filter on pull_request: the Dynamo port lands as a stack of PRs that
+  # target each other rather than main, and each must run CI. push stays main-only.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 
@@ -53,6 +54,64 @@ jobs:
         run: make test-unit
       - name: Build (vite -> PWA)
         run: make build
+
+  template:
+    name: SAM template (sam validate --lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      # Offline: --lint runs cfn-lint and the SAM transform, no AWS credentials.
+      # The template is touched by every PR in the Dynamo-port stack (new tables,
+      # GSIs, functions), so a cheap structural gate is worth having.
+      - name: Validate + lint the SAM template
+        run: sam validate --lint --region us-west-2
+
+  dynamo-contract:
+    name: repository contract (DynamoDB Local)
+    runs-on: ubuntu-latest
+    # The same contract + repo suites the backend job runs under moto, re-run against
+    # a real DynamoDB Local. moto reimplements DynamoDB; conditional-write and (from
+    # PR 4) transaction semantics are only approximate there, so AWS's own engine is
+    # the check that matters for the production path.
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:2.5.2
+        ports:
+          - 8000:8000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend deps into the venv
+        run: |
+          python -m venv backend/.venv
+          backend/.venv/bin/pip install --upgrade pip
+          backend/.venv/bin/pip install -e 'backend[dev]'
+      - name: Wait for DynamoDB Local
+        run: |
+          for i in $(seq 1 30); do
+            curl -s http://localhost:8000 >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo "DynamoDB Local did not come up" >&2
+          exit 1
+      - name: Contract + repo suites against DynamoDB Local
+        env:
+          WP_DDB_ENDPOINT_URL: http://localhost:8000
+          AWS_ACCESS_KEY_ID: testing
+          AWS_SECRET_ACCESS_KEY: testing
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          cd backend && .venv/bin/pytest -q \
+            tests/test_repository_contract.py \
+            tests/test_dynamo_repo.py \
+            tests/test_seed_dynamo.py
 
   commit-lint:
     name: commit messages reference an issue (#N)

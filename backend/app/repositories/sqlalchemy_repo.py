@@ -125,6 +125,13 @@ class SqlAlchemyRepository:
         )
 
     def record_event_qr_checkin(self, campus_id: str, student_id, token: str):
-        return passport_svc.record_event_qr_checkin(
+        # Returns (task, refreshed passport) to match the Dynamo path, which resolves
+        # the active challenge once and reuses it. On SQL both reads are cheap session
+        # queries, so this just keeps the interface uniform.
+        task = passport_svc.record_event_qr_checkin(
             self.db, campus_id=campus_id, student_id=student_id, token=token
         )
+        view = passport_svc.build_passport(
+            self.db, campus_id=campus_id, student_id=student_id
+        )
+        return task, view

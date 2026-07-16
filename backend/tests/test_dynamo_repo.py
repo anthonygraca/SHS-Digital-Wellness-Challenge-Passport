@@ -10,9 +10,7 @@ template provisions, so this doubles as a schema contract check.
 
 from __future__ import annotations
 
-import boto3
 import pytest
-from moto import mock_aws
 
 from app.schemas.challenge import (
     ChallengeCreate,
@@ -22,138 +20,21 @@ from app.schemas.challenge import (
     TaskUpdate,
 )
 from app.services.qr import mint_event_token
-
-PREFIX = "test-"
-REGION = "us-east-1"
-
-
-def _create_tables() -> None:
-    ddb = boto3.client("dynamodb", region_name=REGION)
-    pay = "PAY_PER_REQUEST"
-
-    def gsi(name, keys):
-        return {
-            "IndexName": name,
-            "KeySchema": keys,
-            "Projection": {"ProjectionType": "ALL"},
-        }
-
-    ddb.create_table(
-        TableName=f"{PREFIX}Students",
-        BillingMode=pay,
-        AttributeDefinitions=[{"AttributeName": "student_id", "AttributeType": "S"}],
-        KeySchema=[{"AttributeName": "student_id", "KeyType": "HASH"}],
-    )
-    ddb.create_table(
-        TableName=f"{PREFIX}Challenges",
-        BillingMode=pay,
-        AttributeDefinitions=[
-            {"AttributeName": "id", "AttributeType": "N"},
-            {"AttributeName": "campus_id", "AttributeType": "S"},
-            {"AttributeName": "created_at", "AttributeType": "S"},
-            {"AttributeName": "pub_campus_id", "AttributeType": "S"},
-            {"AttributeName": "published_sort", "AttributeType": "S"},
-        ],
-        KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
-        GlobalSecondaryIndexes=[
-            gsi(
-                "ByCampus",
-                [
-                    {"AttributeName": "campus_id", "KeyType": "HASH"},
-                    {"AttributeName": "created_at", "KeyType": "RANGE"},
-                ],
-            ),
-            gsi(
-                "PublishedByCampus",
-                [
-                    {"AttributeName": "pub_campus_id", "KeyType": "HASH"},
-                    {"AttributeName": "published_sort", "KeyType": "RANGE"},
-                ],
-            ),
-        ],
-    )
-    ddb.create_table(
-        TableName=f"{PREFIX}Tasks",
-        BillingMode=pay,
-        AttributeDefinitions=[
-            {"AttributeName": "id", "AttributeType": "N"},
-            {"AttributeName": "challenge_id", "AttributeType": "N"},
-            {"AttributeName": "position", "AttributeType": "N"},
-        ],
-        KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
-        GlobalSecondaryIndexes=[
-            gsi(
-                "ByChallenge",
-                [
-                    {"AttributeName": "challenge_id", "KeyType": "HASH"},
-                    {"AttributeName": "position", "KeyType": "RANGE"},
-                ],
-            ),
-        ],
-    )
-    ddb.create_table(
-        TableName=f"{PREFIX}AssessmentItems",
-        BillingMode=pay,
-        AttributeDefinitions=[
-            {"AttributeName": "id", "AttributeType": "N"},
-            {"AttributeName": "task_id", "AttributeType": "N"},
-            {"AttributeName": "challenge_id", "AttributeType": "N"},
-        ],
-        KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
-        GlobalSecondaryIndexes=[
-            gsi("ByTask", [{"AttributeName": "task_id", "KeyType": "HASH"}]),
-            gsi("ByChallenge", [{"AttributeName": "challenge_id", "KeyType": "HASH"}]),
-        ],
-    )
-    ddb.create_table(
-        TableName=f"{PREFIX}Enrollments",
-        BillingMode=pay,
-        AttributeDefinitions=[
-            {"AttributeName": "student_id", "AttributeType": "S"},
-            {"AttributeName": "challenge_id", "AttributeType": "N"},
-        ],
-        KeySchema=[
-            {"AttributeName": "student_id", "KeyType": "HASH"},
-            {"AttributeName": "challenge_id", "KeyType": "RANGE"},
-        ],
-    )
-    ddb.create_table(
-        TableName=f"{PREFIX}CheckIns",
-        BillingMode=pay,
-        AttributeDefinitions=[
-            {"AttributeName": "student_id", "AttributeType": "S"},
-            {"AttributeName": "task_id", "AttributeType": "N"},
-        ],
-        KeySchema=[
-            {"AttributeName": "student_id", "KeyType": "HASH"},
-            {"AttributeName": "task_id", "KeyType": "RANGE"},
-        ],
-    )
-    ddb.create_table(
-        TableName=f"{PREFIX}Counters",
-        BillingMode=pay,
-        AttributeDefinitions=[{"AttributeName": "name", "AttributeType": "S"}],
-        KeySchema=[{"AttributeName": "name", "KeyType": "HASH"}],
-    )
+from tests.ddb_support import dynamo_backend, set_env
 
 
 @pytest.fixture
 def repo(monkeypatch):
-    monkeypatch.setenv("WP_PERSISTENCE", "dynamo")
-    monkeypatch.setenv("WP_DDB_TABLE_PREFIX", PREFIX)
-    monkeypatch.setenv("WP_AWS_REGION", REGION)
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
-    monkeypatch.setenv("AWS_DEFAULT_REGION", REGION)
-
     from app.config import get_settings
+    from app.repositories.dynamo_repo import DynamoRepository, reset_tables
 
+    set_env(monkeypatch)
     get_settings.cache_clear()
-    with mock_aws():
-        _create_tables()
-        from app.repositories.dynamo_repo import DynamoRepository
-
+    with dynamo_backend():
+        # Rebuild the module-cached table handles against this test's fresh backend.
+        reset_tables()
         yield DynamoRepository()
+    reset_tables()
     get_settings.cache_clear()
 
 
@@ -325,8 +206,10 @@ def test_event_qr_checkin(repo):
     student_id = "csub#qr@csub.edu"
     token = mint_event_token(t.id)
 
-    task = repo.record_event_qr_checkin("csub", student_id, token)
+    task, view = repo.record_event_qr_checkin("csub", student_id, token)
     assert task.position == 1
+    # The refreshed passport is returned alongside the task (no second challenge lookup).
+    assert [w.status for w in view.weeks] == ["complete"]
 
     # Duplicate scan of the same week -> DuplicateCheckIn.
     from app.services.passport import DuplicateCheckIn, InvalidEventToken

@@ -10,18 +10,11 @@ import importlib
 import pathlib
 import sys
 
-from moto import mock_aws
-
-from tests.test_dynamo_repo import PREFIX, REGION, _create_tables
+from tests.ddb_support import dynamo_backend, set_env
 
 
 def test_seed_dynamo_creates_demo_and_is_idempotent(monkeypatch):
-    monkeypatch.setenv("WP_PERSISTENCE", "dynamo")
-    monkeypatch.setenv("WP_DDB_TABLE_PREFIX", PREFIX)
-    monkeypatch.setenv("WP_AWS_REGION", REGION)
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
-    monkeypatch.setenv("AWS_DEFAULT_REGION", REGION)
+    set_env(monkeypatch)
 
     from app.config import get_settings
 
@@ -29,16 +22,16 @@ def test_seed_dynamo_creates_demo_and_is_idempotent(monkeypatch):
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(repo_root / "scripts"))
 
-    with mock_aws():
-        _create_tables()
+    with dynamo_backend():
+        from app.repositories.dynamo_repo import DynamoRepository, reset_tables
+
+        reset_tables()
         import seed_dynamo
 
         importlib.reload(seed_dynamo)
 
         assert seed_dynamo.main() == 0
         assert seed_dynamo.main() == 0  # idempotent second run is a no-op
-
-        from app.repositories.dynamo_repo import DynamoRepository
 
         repo = DynamoRepository()
         active = repo.get_active_challenge("csub")
@@ -47,4 +40,5 @@ def test_seed_dynamo_creates_demo_and_is_idempotent(monkeypatch):
         full = repo.get_challenge("csub", active.id)
         assert [t.position for t in full.tasks] == [1, 2, 3, 4, 5, 6, 7]
 
+    reset_tables()
     get_settings.cache_clear()

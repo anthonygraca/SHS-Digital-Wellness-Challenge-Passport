@@ -87,8 +87,31 @@ def _dt(value: Any) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
-class DynamoRepository:
-    def __init__(self) -> None:
+# Repo-attribute name -> table-name suffix (SAM names tables `{prefix}{Suffix}`).
+_TABLE_SUFFIXES = {
+    "students": "Students",
+    "challenges": "Challenges",
+    "tasks": "Tasks",
+    "items": "AssessmentItems",
+    "enrollments": "Enrollments",
+    "checkins": "CheckIns",
+    "counters": "Counters",
+}
+
+_tables_cache: dict[str, Any] | None = None
+
+
+def _tables() -> dict[str, Any]:
+    """Build (once) and return the boto3 Table handles, keyed by repo attribute name.
+
+    Cached at module scope: ``boto3.resource()`` parses the botocore service model
+    (tens of ms) and ``get_repo`` constructs a ``DynamoRepository`` per request, so
+    building the resource per request added that cost to every API call. On Lambda the
+    cache persists across warm invocations. Tests call :func:`reset_tables` after
+    entering a fresh moto / DynamoDB-Local context so the handles rebuild against it.
+    """
+    global _tables_cache
+    if _tables_cache is None:
         settings = get_settings()
         kwargs: dict[str, Any] = {}
         if settings.aws_region:
@@ -97,13 +120,32 @@ class DynamoRepository:
             kwargs["endpoint_url"] = settings.ddb_endpoint_url
         ddb = boto3.resource("dynamodb", **kwargs)
         p = settings.ddb_table_prefix
-        self.students = ddb.Table(f"{p}Students")
-        self.challenges = ddb.Table(f"{p}Challenges")
-        self.tasks = ddb.Table(f"{p}Tasks")
-        self.items = ddb.Table(f"{p}AssessmentItems")
-        self.enrollments = ddb.Table(f"{p}Enrollments")
-        self.checkins = ddb.Table(f"{p}CheckIns")
-        self.counters = ddb.Table(f"{p}Counters")
+        _tables_cache = {
+            attr: ddb.Table(f"{p}{suffix}") for attr, suffix in _TABLE_SUFFIXES.items()
+        }
+    return _tables_cache
+
+
+def reset_tables() -> None:
+    """Drop the cached Table handles so the next use rebuilds them.
+
+    Only tests need this: they swap the moto / DynamoDB-Local backend between cases,
+    and a handle cached against a torn-down backend would find no tables.
+    """
+    global _tables_cache
+    _tables_cache = None
+
+
+class DynamoRepository:
+    def __init__(self) -> None:
+        t = _tables()
+        self.students = t["students"]
+        self.challenges = t["challenges"]
+        self.tasks = t["tasks"]
+        self.items = t["items"]
+        self.enrollments = t["enrollments"]
+        self.checkins = t["checkins"]
+        self.counters = t["counters"]
 
     # --- helpers ------------------------------------------------------------
     def _next_id(self, name: str) -> int:
@@ -280,12 +322,16 @@ class DynamoRepository:
         return self._challenge_dto(raw, with_tasks=True)
 
     def get_active_challenge(self, campus_id: str) -> ChallengeDTO | None:
-        rows = self._query_all(
-            self.challenges,
+        # Only the latest-starting published challenge matters, so read exactly one
+        # row (Limit=1) rather than paginating the whole partition to discard all but
+        # rows[0] — this is on the passport hot path.
+        resp = self.challenges.query(
             IndexName="PublishedByCampus",
             KeyConditionExpression=Key("pub_campus_id").eq(campus_id),
             ScanIndexForward=False,  # published_sort DESC -> latest start_date wins
+            Limit=1,
         )
+        rows = resp.get("Items", [])
         if not rows:
             return None
         return self._challenge_dto(rows[0])
@@ -371,7 +417,10 @@ class DynamoRepository:
         with self.items.batch_writer() as batch:
             for ir in item_rows:
                 batch.delete_item(Key={"id": _int(ir["id"])})
-        # Close the position gap: decrement every task after the removed one.
+        # Close the position gap: decrement every task after the removed one. A serial
+        # update loop, not a batch — this is an admin edit over a challenge's ~6 tasks,
+        # and update_item cannot go in a batch_writer (put/delete only). Not worth the
+        # complexity of a transaction at this scale.
         remaining = self._query_all(
             self.tasks,
             IndexName="ByChallenge",
@@ -533,16 +582,36 @@ class DynamoRepository:
 
     # --- Passport -----------------------------------------------------------
     def _completed_task_ids(self, student_id, task_ids: set[int]) -> set[int]:
-        rows = self._query_all(
-            self.checkins,
-            KeyConditionExpression=Key("student_id").eq(student_id),
-        )
-        return {_int(r["task_id"]) for r in rows} & task_ids
+        # The exact (student_id, task_id) keys are known — this challenge's tasks — so
+        # BatchGetItem fetches only those rows, rather than querying the student's whole
+        # check-in history across every challenge and intersecting in Python (which grew
+        # unboundedly with each past challenge). ProjectionExpression trims to the keys.
+        if not task_ids:
+            return set()
+        keys = [{"student_id": student_id, "task_id": tid} for tid in task_ids]
+        found: set[int] = set()
+        # BatchGetItem caps at 100 keys/request; a challenge has ~6 tasks, but chunk
+        # to stay correct if that ever grows.
+        for start in range(0, len(keys), 100):
+            chunk = keys[start : start + 100]
+            resp = self.checkins.meta.client.batch_get_item(
+                RequestItems={
+                    self.checkins.name: {
+                        "Keys": chunk,
+                        "ProjectionExpression": "task_id",
+                    }
+                }
+            )
+            for r in resp["Responses"].get(self.checkins.name, []):
+                found.add(_int(r["task_id"]))
+        return found
 
-    def build_passport(self, campus_id: str, student_id) -> PassportView | None:
-        challenge = self.get_active_challenge(campus_id)
-        if challenge is None:
-            return None
+    def _build_passport_for(self, challenge: ChallengeDTO, student_id) -> PassportView:
+        """Assemble the passport for an already-resolved active challenge.
+
+        Split out so the QR scan path can reuse the challenge it just validated instead
+        of re-querying ``get_active_challenge`` a second time for the refreshed passport.
+        """
         tasks = self._tasks_for_challenge(challenge.id)
         completed = self._completed_task_ids(student_id, {t.id for t in tasks})
         return assemble_passport(
@@ -551,6 +620,12 @@ class DynamoRepository:
             tasks=tasks,
             completed_ids=completed,
         )
+
+    def build_passport(self, campus_id: str, student_id) -> PassportView | None:
+        challenge = self.get_active_challenge(campus_id)
+        if challenge is None:
+            return None
+        return self._build_passport_for(challenge, student_id)
 
     def _create_checkin(self, student_id, task_id: int, method: str) -> bool:
         """Insert a check-in; return False if the student already has one (idempotent)."""
@@ -568,7 +643,9 @@ class DynamoRepository:
         except self.checkins.meta.client.exceptions.ConditionalCheckFailedException:
             return False
 
-    def record_event_qr_checkin(self, campus_id: str, student_id, token: str) -> TaskDTO:
+    def record_event_qr_checkin(
+        self, campus_id: str, student_id, token: str
+    ) -> tuple[TaskDTO, PassportView]:
         task_id = verify_event_token(token)
         if task_id is None:
             raise InvalidEventToken
@@ -580,4 +657,6 @@ class DynamoRepository:
             raise InvalidEventToken
         if not self._create_checkin(student_id, task_id, "event_qr"):
             raise DuplicateCheckIn
-        return self._task_dto(raw)
+        # Reuse the challenge already resolved above for the refreshed passport, so the
+        # scan path resolves the active challenge once rather than twice.
+        return self._task_dto(raw), self._build_passport_for(challenge, student_id)

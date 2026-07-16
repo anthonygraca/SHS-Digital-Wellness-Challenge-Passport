@@ -122,7 +122,9 @@ def scan_checkin(
     campus_id: str = claims["campus_id"]
     student_id = claims["student_id"]
     try:
-        task = repo.record_event_qr_checkin(
+        # Returns the refreshed passport too, so the read does not re-resolve the
+        # active challenge after the write (the scan is the UC-3 core loop hot path).
+        task, view = repo.record_event_qr_checkin(
             campus_id=campus_id, student_id=student_id, token=payload.token
         )
     except InvalidEventToken as exc:
@@ -150,13 +152,6 @@ def scan_checkin(
         db, student_id=student_id, task=task, content_ref="tip"
     )
 
-    view = repo.build_passport(campus_id=campus_id, student_id=student_id)
-    if view is None:
-        # Unreachable in practice: the check-in only succeeds when an active
-        # challenge exists, but keep the read path total.
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="No active challenge"
-        )
     return CheckInResult(
         passport=_to_passport_out(view),
         tip=_event_qr_tip(title),
