@@ -83,6 +83,31 @@ class StudentDTO:
 
 
 @dataclass
+class CheckInDTO:
+    id: int
+    student_id: int | str
+    task_id: int
+    ts: datetime
+    method: str
+    verified_by: str | None
+
+
+@dataclass
+class CheckInAuditDTO:
+    id: int
+    campus_id: str
+    student_id: int | str
+    task_id: int
+    checkin_id: int | None
+    action: str
+    actor_subject: str
+    reason: str
+    ts: datetime
+    prior_state: dict | None
+    new_state: dict | None
+
+
+@dataclass
 class ThemeDTO:
     id: str
     name: str

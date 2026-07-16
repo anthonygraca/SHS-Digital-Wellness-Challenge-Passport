@@ -139,6 +139,14 @@ Resources:
             TableName: !Sub "${TablePrefix}AssessmentItems"
         - DynamoDBCrudPolicy:
             TableName: !Sub "${TablePrefix}Counters"
+        # FR-D6 manual completion override: writes a CheckIn and its audit row in one
+        # transaction, and reads Students to resolve/display the subject.
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}CheckIns"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}CheckInAudits"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Students"
       Events:
         Challenges:
           Type: HttpApi
@@ -311,10 +319,57 @@ Resources:
           AttributeType: S
         - AttributeName: task_id
           AttributeType: N
+        # Denormalized off the task so a challenge's check-ins are one query — the
+        # same pattern AssessmentItems already uses for its ByChallenge index.
+        - AttributeName: challenge_id
+          AttributeType: N
+        - AttributeName: ts
+          AttributeType: S
       KeySchema:
         - AttributeName: student_id
           KeyType: HASH
         - AttributeName: task_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        # The base table answers "has THIS student done this task?". These answer the
+        # admin/report direction — "who has done this task / this challenge?" — which
+        # the base key cannot serve at all. ts as the range key makes newest-first and
+        # "the most recent N" native, with no in-app sort.
+        - IndexName: ByTask
+          KeySchema:
+            - AttributeName: task_id
+              KeyType: HASH
+            - AttributeName: ts
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ByChallenge
+          KeySchema:
+            - AttributeName: challenge_id
+              KeyType: HASH
+            - AttributeName: ts
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # Append-only ledger of admin completion changes (FR-D6 / US-27). Written only in
+  # the same transaction as the CheckIn change it records, never updated or deleted.
+  CheckInAuditsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TablePrefix}CheckInAudits"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: task_id
+          AttributeType: N
+        # "<ts>#<id>" — encodes the ledger's ordering into the key, so reading it
+        # newest-first is the index's own order rather than an in-app sort.
+        - AttributeName: audit_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: task_id
+          KeyType: HASH
+        - AttributeName: audit_id
           KeyType: RANGE
 
   CountersTable:

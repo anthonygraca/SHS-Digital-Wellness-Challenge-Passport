@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import require_admin
 from app.db import get_db
-from app.models.challenge import CheckIn
 from app.models.student import Student
 from app.repositories.base import Repository, get_repo
 from app.schemas.challenge import (
@@ -33,8 +32,6 @@ from app.schemas.challenge import (
 )
 from app.services import assessments as assessment_svc
 from app.services import challenges as svc
-from app.services import checkins as checkin_svc
-from app.services import students as students_svc
 
 router = APIRouter(prefix="/api/challenges", tags=["challenges"])
 
@@ -309,7 +306,7 @@ def delete_assessment_item(
 # ---------------------------------------------------------------------------
 
 
-def _get_student_or_404(db: Session, campus_id: str, sso_subject: str) -> Student:
+def _get_student_or_404(repo: Repository, campus_id: str, sso_subject: str):
     """Resolve a student by SSO subject within the caller's campus.
 
     Student rows are only ever minted by /auth/acs, so an unknown subject means
@@ -317,7 +314,7 @@ def _get_student_or_404(db: Session, campus_id: str, sso_subject: str) -> Studen
     would let an admin mint arbitrary unverified subjects and quietly pollute
     enrollment and eligibility data.
     """
-    student = students_svc.get_student(db, campus_id, sso_subject)
+    student = repo.get_student(campus_id, sso_subject)
     if student is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -329,22 +326,22 @@ def _get_student_or_404(db: Session, campus_id: str, sso_subject: str) -> Studen
     return student
 
 
-def _get_student_or_404_by_id(db: Session, campus_id: str, student_id: int) -> Student:
+def _get_student_or_404_by_id(repo: Repository, campus_id: str, student_id):
     """Load the student a check-in points at, for its subject and audit snapshot.
 
     The campus filter is belt-and-braces: the check-in was already reached via a
     campus-scoped challenge, so a mismatch here would mean cross-campus data.
     """
-    student = db.get(Student, student_id)
-    if student is None or student.campus_id != campus_id:
+    student = repo.get_student_by_id(campus_id, student_id)
+    if student is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Student not found"
         )
     return student
 
 
-def _get_checkin_or_404(db: Session, task_id: int, checkin_id: int) -> CheckIn:
-    checkin = checkin_svc.get_checkin(db, task_id, checkin_id)
+def _get_checkin_or_404(repo: Repository, task_id: int, checkin_id: int):
+    checkin = repo.get_checkin(task_id, checkin_id)
     if checkin is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Check-in not found"
@@ -352,7 +349,7 @@ def _get_checkin_or_404(db: Session, task_id: int, checkin_id: int) -> CheckIn:
     return checkin
 
 
-def _checkin_out(checkin: CheckIn, student: Student) -> CheckInOut:
+def _checkin_out(checkin, student) -> CheckInOut:
     """Assemble the response — student_subject lives on the Student row."""
     return CheckInOut(
         id=checkin.id,
@@ -376,17 +373,15 @@ def create_manual_checkin(
     body: ManualCheckInCreate,
     claims: dict = Depends(require_admin),
     repo: Repository = Depends(get_repo),
-    db: Session = Depends(get_db),
 ):
     """Manually mark a student complete, writing an audit row (FR-D6 / US-27)."""
     campus_id: str = claims["campus_id"]
     _get_challenge_or_404(repo, campus_id, challenge_id)
     task = _get_task_or_404(repo, challenge_id, task_id)
-    student = _get_student_or_404(db, campus_id, body.student_subject)
+    student = _get_student_or_404(repo, campus_id, body.student_subject)
 
     try:
-        checkin = checkin_svc.create_manual_checkin(
-            db,
+        checkin = repo.create_manual_checkin(
             campus_id=campus_id,
             task=task,
             student=student,
@@ -412,14 +407,13 @@ def list_checkins(
     task_id: int,
     claims: dict = Depends(require_admin),
     repo: Repository = Depends(get_repo),
-    db: Session = Depends(get_db),
 ):
     """List every check-in recorded for a task."""
     _get_challenge_or_404(repo, claims["campus_id"], challenge_id)
     _get_task_or_404(repo, challenge_id, task_id)
     return [
         _checkin_out(checkin, student)
-        for checkin, student in checkin_svc.list_task_checkins(db, task_id)
+        for checkin, student in repo.list_task_checkins(task_id)
     ]
 
 
@@ -434,17 +428,15 @@ def correct_checkin(
     body: CheckInCorrect,
     claims: dict = Depends(require_admin),
     repo: Repository = Depends(get_repo),
-    db: Session = Depends(get_db),
 ):
     """Correct an existing check-in, preserving the prior state for audit."""
     campus_id: str = claims["campus_id"]
     _get_challenge_or_404(repo, campus_id, challenge_id)
     _get_task_or_404(repo, challenge_id, task_id)
-    checkin = _get_checkin_or_404(db, task_id, checkin_id)
-    student = _get_student_or_404_by_id(db, campus_id, checkin.student_id)
+    checkin = _get_checkin_or_404(repo, task_id, checkin_id)
+    student = _get_student_or_404_by_id(repo, campus_id, checkin.student_id)
 
-    updated = checkin_svc.correct_checkin(
-        db,
+    updated = repo.correct_checkin(
         campus_id=campus_id,
         checkin=checkin,
         student=student,
@@ -467,17 +459,15 @@ def remove_checkin(
     body: CheckInRemove,
     claims: dict = Depends(require_admin),
     repo: Repository = Depends(get_repo),
-    db: Session = Depends(get_db),
 ):
     """Remove an erroneous check-in. The audit snapshot preserves it (FR-D6)."""
     campus_id: str = claims["campus_id"]
     _get_challenge_or_404(repo, campus_id, challenge_id)
     _get_task_or_404(repo, challenge_id, task_id)
-    checkin = _get_checkin_or_404(db, task_id, checkin_id)
-    student = _get_student_or_404_by_id(db, campus_id, checkin.student_id)
+    checkin = _get_checkin_or_404(repo, task_id, checkin_id)
+    student = _get_student_or_404_by_id(repo, campus_id, checkin.student_id)
 
-    checkin_svc.remove_checkin(
-        db,
+    repo.remove_checkin(
         campus_id=campus_id,
         checkin=checkin,
         student=student,
@@ -496,7 +486,6 @@ def list_checkin_audits(
     student_subject: str | None = None,
     claims: dict = Depends(require_admin),
     repo: Repository = Depends(get_repo),
-    db: Session = Depends(get_db),
 ):
     """Read the append-only audit ledger for a task, newest first (FR-D6)."""
     campus_id: str = claims["campus_id"]
@@ -505,8 +494,8 @@ def list_checkin_audits(
 
     student_id = None
     if student_subject is not None:
-        student_id = _get_student_or_404(db, campus_id, student_subject).id
-    return checkin_svc.list_task_audits(db, task_id, student_id)
+        student_id = _get_student_or_404(repo, campus_id, student_subject).id
+    return repo.list_task_audits(task_id, student_id)
 
 
 # ---------------------------------------------------------------------------
@@ -606,7 +595,7 @@ def override_response_score(
     _get_task_or_404(repo, challenge_id, task_id)
     _get_item_or_404(repo, task_id, item_id)
     response = _get_response_or_404(db, item_id, response_id)
-    student = _get_student_or_404_by_id(db, campus_id, response.student_id)
+    student = _get_student_or_404_by_id(repo, campus_id, response.student_id)
 
     updated = assessment_svc.override_response_score(db, response, body.score)
     return _response_out(updated, student)

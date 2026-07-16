@@ -13,12 +13,23 @@ Multi-table model — one table per entity, mirroring the SQLite schema:
                               GSI ByChallenge      (challenge_id)
     {prefix}Enrollments       PK student_id (S), SK challenge_id (N)
     {prefix}CheckIns          PK student_id (S), SK task_id (N)
+                              GSI ByTask           (task_id, ts)
+                              GSI ByChallenge      (challenge_id, ts)
+    {prefix}CheckInAudits     PK task_id (N), SK audit_id (S = "<ts>#<id>")
+    {prefix}Themes            PK id (S = the theme slug)
     {prefix}Counters          PK name (S), attr seq (N)   [integer-id allocation]
+
+The base CheckIns key answers the student's question ("have I done this task?"); the
+two GSIs answer the admin's ("who has done this task / this challenge?"), which the
+base key cannot. ``challenge_id`` is denormalized onto the row for the second one.
 
 DynamoDB has no constraints, so the SQL invariants are re-implemented here:
 uniqueness/idempotency via conditional writes, cascade-delete + position renumber in
-code, and integer ids via an atomic counter. The pure passport derivation and the QR
-token + exceptions are shared with the SQL path (app.services.passport / .qr).
+code, and integer ids via an atomic counter. FR-D6's "a completion never changes
+without leaving a trace" spans two tables, so it needs TransactWriteItems rather than
+a commit. The pure passport derivation and the QR token + exceptions are shared with
+the SQL path (app.services.passport / .qr), as is the audit snapshot shape
+(app.services.checkins.checkin_snapshot).
 """
 
 from __future__ import annotations
@@ -28,12 +39,14 @@ from decimal import Decimal
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 
 from app.config import get_settings
 from app.repositories.dto import (
     AssessmentItemDTO,
     ChallengeDTO,
+    CheckInAuditDTO,
+    CheckInDTO,
     EnrollmentDTO,
     StudentDTO,
     TaskDTO,
@@ -50,6 +63,7 @@ from app.schemas.challenge import (
     TaskUpdate,
 )
 from app.schemas.theme import ThemeCreate, ThemeUpdate
+from app.services.checkins import checkin_snapshot
 from app.services.passport import (
     DuplicateCheckIn,
     InvalidEventToken,
@@ -98,6 +112,7 @@ _TABLE_SUFFIXES = {
     "items": "AssessmentItems",
     "enrollments": "Enrollments",
     "checkins": "CheckIns",
+    "audits": "CheckInAudits",
     "counters": "Counters",
     "themes": "Themes",
 }
@@ -149,6 +164,7 @@ class DynamoRepository:
         self.items = t["items"]
         self.enrollments = t["enrollments"]
         self.checkins = t["checkins"]
+        self.audits = t["audits"]
         self.counters = t["counters"]
         self.themes = t["themes"]
 
@@ -557,6 +573,16 @@ class DynamoRepository:
             return existing
 
     # --- Students -----------------------------------------------------------
+    @staticmethod
+    def _student_dto(raw: dict) -> StudentDTO:
+        return StudentDTO(
+            id=raw["student_id"],
+            campus_id=raw["campus_id"],
+            sso_subject=raw["sso_subject"],
+            affiliation=raw["affiliation"],
+            created_at=_dt(raw.get("created_at")),
+        )
+
     def get_or_create_student(
         self, campus_id: str, sso_subject: str, affiliation: str
     ) -> StudentDTO:
@@ -577,12 +603,285 @@ class DynamoRepository:
             raw = item
         except self.students.meta.client.exceptions.ConditionalCheckFailedException:
             raw = self.students.get_item(Key={"student_id": student_id}).get("Item")
-        return StudentDTO(
-            id=raw["student_id"],
+        return self._student_dto(raw)
+
+    def get_student(self, campus_id: str, sso_subject: str) -> StudentDTO | None:
+        # The key IS (campus, subject) on this backend, so the lookup the SQL path
+        # does with a two-column filter is a point read here.
+        raw = self.students.get_item(
+            Key={"student_id": f"{campus_id}#{sso_subject}"}
+        ).get("Item")
+        return self._student_dto(raw) if raw else None
+
+    def get_student_by_id(self, campus_id: str, student_id) -> StudentDTO | None:
+        raw = self.students.get_item(Key={"student_id": student_id}).get("Item")
+        if raw is None or raw.get("campus_id") != campus_id:
+            return None
+        return self._student_dto(raw)
+
+    # --- Manual completion override + audit (FR-D6 / US-27) -----------------
+    @staticmethod
+    def _checkin_dto(raw: dict) -> CheckInDTO:
+        return CheckInDTO(
+            id=_int(raw["id"]),
+            student_id=raw["student_id"],
+            task_id=_int(raw["task_id"]),
+            ts=_dt(raw.get("ts")),
+            method=raw["method"],
+            verified_by=raw.get("verified_by"),
+        )
+
+    @staticmethod
+    def _audit_dto(raw: dict) -> CheckInAuditDTO:
+        return CheckInAuditDTO(
+            id=_int(raw["id"]),
             campus_id=raw["campus_id"],
-            sso_subject=raw["sso_subject"],
-            affiliation=raw["affiliation"],
-            created_at=_dt(raw.get("created_at")),
+            student_id=raw["student_id"],
+            task_id=_int(raw["task_id"]),
+            checkin_id=_int(raw["checkin_id"]) if raw.get("checkin_id") else None,
+            action=raw["action"],
+            actor_subject=raw["actor_subject"],
+            reason=raw["reason"],
+            ts=_dt(raw.get("ts")),
+            prior_state=raw.get("prior_state"),
+            new_state=raw.get("new_state"),
+        )
+
+    def _checkins_for_task(self, task_id: int) -> list[dict]:
+        return self._query_all(
+            self.checkins,
+            IndexName="ByTask",
+            KeyConditionExpression=Key("task_id").eq(task_id),
+            ScanIndexForward=False,  # ts DESC — newest first, as the SQL query orders
+        )
+
+    def get_checkin(self, task_id: int, checkin_id: int) -> CheckInDTO | None:
+        # Filter on the exposed int id over the task's own check-ins (~200 rows on an
+        # admin path). No ById GSI: a third index to save one in-memory scan of a cold
+        # path isn't worth its write cost — add one if this ever shows up in a trace.
+        for raw in self._checkins_for_task(task_id):
+            if _int(raw.get("id", 0)) == checkin_id:
+                return self._checkin_dto(raw)
+        return None
+
+    def list_task_checkins(self, task_id: int) -> list[tuple[CheckInDTO, StudentDTO]]:
+        rows = self._checkins_for_task(task_id)
+        if not rows:
+            return []
+        # One batched read for the students, rather than a point read per check-in —
+        # the Dynamo analogue of the SQL join.
+        ids = list({r["student_id"] for r in rows})
+        found: dict[str, StudentDTO] = {}
+        for start in range(0, len(ids), 100):
+            chunk = ids[start : start + 100]
+            resp = self.students.meta.client.batch_get_item(
+                RequestItems={
+                    self.students.name: {"Keys": [{"student_id": sid} for sid in chunk]}
+                }
+            )
+            for s in resp["Responses"].get(self.students.name, []):
+                found[s["student_id"]] = self._student_dto(s)
+        return [
+            (self._checkin_dto(r), found[r["student_id"]])
+            for r in rows
+            if r["student_id"] in found
+        ]
+
+    def list_task_audits(self, task_id: int, student_id=None) -> list[CheckInAuditDTO]:
+        kwargs: dict[str, Any] = {
+            "KeyConditionExpression": Key("task_id").eq(task_id),
+            # The sort key encodes the timestamp, so newest-first is the index order —
+            # matching the SQL order_by(ts.desc(), id.desc()) including the tie-break.
+            "ScanIndexForward": False,
+        }
+        if student_id is not None:
+            kwargs["FilterExpression"] = Attr("student_id").eq(student_id)
+        return [self._audit_dto(r) for r in self._query_all(self.audits, **kwargs)]
+
+    def _audit_item(
+        self,
+        *,
+        campus_id: str,
+        action: str,
+        student_id,
+        task_id: int,
+        checkin_id: int | None,
+        actor_subject: str,
+        reason: str,
+        prior: dict | None,
+        new: dict | None,
+    ) -> dict:
+        audit_id = self._next_id("audit")
+        ts = _now()
+        return _prune(
+            {
+                "task_id": task_id,
+                # ts#id: sorts the ledger by time, the id breaking ties within a
+                # timestamp, so the query needs no in-app sort.
+                "audit_id": f"{ts.isoformat()}#{audit_id}",
+                "id": audit_id,
+                "campus_id": campus_id,
+                "student_id": student_id,
+                "checkin_id": checkin_id,
+                "action": action,
+                "actor_subject": actor_subject,
+                "reason": reason,
+                "ts": _enc(ts),
+                "prior_state": prior,
+                "new_state": new,
+            }
+        )
+
+    def _transact(self, items: list[dict]) -> None:
+        """Write the check-in change and its audit row as one transaction.
+
+        services/checkins.py names the invariant: a completion must never change
+        without leaving a trace. On SQL that is one commit; here the two rows live in
+        different tables, so only TransactWriteItems can promise it. Two put_items
+        could half-apply and the ledger would quietly lie.
+        """
+        self.checkins.meta.client.transact_write_items(TransactItems=items)
+
+    def create_manual_checkin(
+        self,
+        *,
+        campus_id: str,
+        task,
+        student,
+        actor_subject: str,
+        reason: str,
+        ts: datetime | None = None,
+    ) -> CheckInDTO:
+        item = _prune(
+            {
+                "student_id": student.id,
+                "task_id": task.id,
+                "id": self._next_id("checkin"),
+                "challenge_id": task.challenge_id,
+                "ts": _enc(ts or _now()),
+                "method": "manual",
+                "verified_by": actor_subject,
+            }
+        )
+        dto = self._checkin_dto(item)
+        audit = self._audit_item(
+            campus_id=campus_id,
+            action="create",
+            student_id=student.id,
+            task_id=task.id,
+            checkin_id=dto.id,
+            actor_subject=actor_subject,
+            reason=reason,
+            prior=None,
+            new=checkin_snapshot(dto, student),
+        )
+        try:
+            self._transact(
+                [
+                    {
+                        "Put": {
+                            "TableName": self.checkins.name,
+                            "Item": item,
+                            # The Dynamo form of uq_checkin_student_task: the condition
+                            # is part of the transaction, so the duplicate check cannot
+                            # race the write the way a read-then-write would.
+                            "ConditionExpression": "attribute_not_exists(student_id)",
+                        }
+                    },
+                    {"Put": {"TableName": self.audits.name, "Item": audit}},
+                ]
+            )
+        except self.checkins.meta.client.exceptions.TransactionCanceledException as exc:
+            reasons = exc.response.get("CancellationReasons") or []
+            if reasons and reasons[0].get("Code") == "ConditionalCheckFailed":
+                raise ValueError("Student already has a check-in for this task") from exc
+            raise
+        return dto
+
+    def correct_checkin(
+        self,
+        *,
+        campus_id: str,
+        checkin,
+        student,
+        actor_subject: str,
+        reason: str,
+        method: str | None = None,
+        ts: datetime | None = None,
+    ) -> CheckInDTO:
+        prior = checkin_snapshot(checkin, student)
+        updated = CheckInDTO(
+            id=checkin.id,
+            student_id=checkin.student_id,
+            task_id=checkin.task_id,
+            ts=ts or checkin.ts,
+            method=method or checkin.method,
+            verified_by=actor_subject,
+        )
+        audit = self._audit_item(
+            campus_id=campus_id,
+            action="update",
+            student_id=checkin.student_id,
+            task_id=checkin.task_id,
+            checkin_id=checkin.id,
+            actor_subject=actor_subject,
+            reason=reason,
+            prior=prior,
+            new=checkin_snapshot(updated, student),
+        )
+        self._transact(
+            [
+                {
+                    "Update": {
+                        "TableName": self.checkins.name,
+                        "Key": {
+                            "student_id": checkin.student_id,
+                            "task_id": checkin.task_id,
+                        },
+                        # An Update, not a Put: it leaves challenge_id and id in place
+                        # without re-reading the row to copy them forward.
+                        "UpdateExpression": ("SET #m = :m, #t = :t, verified_by = :v"),
+                        "ExpressionAttributeNames": {"#m": "method", "#t": "ts"},
+                        "ExpressionAttributeValues": {
+                            ":m": updated.method,
+                            ":t": _enc(updated.ts),
+                            ":v": actor_subject,
+                        },
+                    }
+                },
+                {"Put": {"TableName": self.audits.name, "Item": audit}},
+            ]
+        )
+        return updated
+
+    def remove_checkin(
+        self, *, campus_id: str, checkin, student, actor_subject: str, reason: str
+    ) -> None:
+        audit = self._audit_item(
+            campus_id=campus_id,
+            action="delete",
+            student_id=checkin.student_id,
+            task_id=checkin.task_id,
+            checkin_id=checkin.id,
+            actor_subject=actor_subject,
+            reason=reason,
+            # The snapshot is what survives the row.
+            prior=checkin_snapshot(checkin, student),
+            new=None,
+        )
+        self._transact(
+            [
+                {
+                    "Delete": {
+                        "TableName": self.checkins.name,
+                        "Key": {
+                            "student_id": checkin.student_id,
+                            "task_id": checkin.task_id,
+                        },
+                    }
+                },
+                {"Put": {"TableName": self.audits.name, "Item": audit}},
+            ]
         )
 
     # --- Themes -------------------------------------------------------------
@@ -721,16 +1020,28 @@ class DynamoRepository:
             return None
         return self._build_passport_for(challenge, student_id)
 
-    def _create_checkin(self, student_id, task_id: int, method: str) -> bool:
-        """Insert a check-in; return False if the student already has one (idempotent)."""
+    def _create_checkin(
+        self, student_id, task_id: int, challenge_id: int, method: str
+    ) -> bool:
+        """Insert a check-in; return False if the student already has one (idempotent).
+
+        Carries the GSI keys every admin/report read needs: ``id`` (the int the API
+        exposes), ``challenge_id`` (denormalized off the task, the ByChallenge hash)
+        and ``ts`` (the ByTask/ByChallenge range). A row missing any of them would be
+        invisible to those indexes — no error, just absent.
+        """
         try:
             self.checkins.put_item(
-                Item={
-                    "student_id": student_id,
-                    "task_id": task_id,
-                    "ts": _enc(_now()),
-                    "method": method,
-                },
+                Item=_prune(
+                    {
+                        "student_id": student_id,
+                        "task_id": task_id,
+                        "id": self._next_id("checkin"),
+                        "challenge_id": challenge_id,
+                        "ts": _enc(_now()),
+                        "method": method,
+                    }
+                ),
                 ConditionExpression="attribute_not_exists(student_id)",
             )
             return True
@@ -749,7 +1060,7 @@ class DynamoRepository:
         raw = self.tasks.get_item(Key={"id": task_id}).get("Item")
         if raw is None or _int(raw.get("challenge_id")) != challenge.id:
             raise InvalidEventToken
-        if not self._create_checkin(student_id, task_id, "event_qr"):
+        if not self._create_checkin(student_id, task_id, challenge.id, "event_qr"):
             raise DuplicateCheckIn
         # Reuse the challenge already resolved above for the refreshed passport, so the
         # scan path resolves the active challenge once rather than twice.

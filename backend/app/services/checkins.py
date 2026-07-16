@@ -22,12 +22,16 @@ from app.models.challenge import CheckIn, CheckInAudit, Task
 from app.models.student import Student
 
 
-def _snapshot(checkin: CheckIn, student: Student) -> dict:
+def checkin_snapshot(checkin: CheckIn, student: Student) -> dict:
     """A self-contained JSON snapshot of a check-in.
 
     Carries student_subject (not just the id) so the row still means something
     after the student or task it referenced is gone. ``ts`` is isoformat'd
     because SQLAlchemy's JSON column cannot serialize a datetime.
+
+    Public because the DynamoDB repository builds the same snapshots for the same
+    ledger: reading attributes only, it works on the ORM rows here and on the DTOs
+    there, which keeps an audit row identical whichever backend wrote it.
     """
     return {
         "checkin_id": checkin.id,
@@ -162,7 +166,7 @@ def create_manual_checkin(
         actor_subject=actor_subject,
         reason=reason,
         prior=None,
-        new=_snapshot(checkin, student),
+        new=checkin_snapshot(checkin, student),
     )
     db.commit()
     db.refresh(checkin)
@@ -181,7 +185,7 @@ def correct_checkin(
     ts: datetime | None = None,
 ) -> CheckIn:
     """Correct an existing check-in, preserving the prior state for audit."""
-    prior = _snapshot(checkin, student)
+    prior = checkin_snapshot(checkin, student)
 
     if method is not None:
         checkin.method = method
@@ -200,7 +204,7 @@ def correct_checkin(
         actor_subject=actor_subject,
         reason=reason,
         prior=prior,
-        new=_snapshot(checkin, student),
+        new=checkin_snapshot(checkin, student),
     )
     db.commit()
     db.refresh(checkin)
@@ -218,7 +222,7 @@ def remove_checkin(
 ) -> None:
     """Hard-delete a check-in. The prior_state snapshot is what survives it."""
     # Snapshot BEFORE the delete — afterwards the attributes are expired.
-    prior = _snapshot(checkin, student)
+    prior = checkin_snapshot(checkin, student)
     student_id, task_id, checkin_id = checkin.student_id, checkin.task_id, checkin.id
 
     db.delete(checkin)

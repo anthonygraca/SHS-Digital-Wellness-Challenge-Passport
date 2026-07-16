@@ -249,6 +249,190 @@ def test_completed_tasks_are_scoped_to_the_student(repo):
     assert [w.status for w in alice_view.weeks] == ["complete"]
 
 
+# --- manual completion override + audit (FR-D6 / US-27) ---------------------
+def test_manual_checkin_writes_the_checkin_and_its_audit_row(repo):
+    _ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    stu = _student(repo)
+
+    checkin = repo.create_manual_checkin(
+        campus_id="csub",
+        task=t1,
+        student=stu,
+        actor_subject="admin@csub.edu",
+        reason="Signed the paper sheet at the door",
+    )
+    assert checkin.method == "manual"
+    assert checkin.verified_by == "admin@csub.edu"
+    # It counts as a completion on the student's passport.
+    assert [w.status for w in repo.build_passport("csub", stu.id).weeks] == ["complete"]
+
+    audits = repo.list_task_audits(t1.id)
+    assert len(audits) == 1
+    assert audits[0].action == "create"
+    assert audits[0].actor_subject == "admin@csub.edu"
+    assert audits[0].reason == "Signed the paper sheet at the door"
+    assert audits[0].prior_state is None
+    assert audits[0].new_state["student_subject"] == "stu@csub.edu"
+    assert audits[0].new_state["method"] == "manual"
+
+
+def test_manual_checkin_refuses_a_duplicate(repo):
+    _ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    stu = _student(repo)
+    args = dict(campus_id="csub", task=t1, student=stu, actor_subject="admin", reason="r")
+    repo.create_manual_checkin(**args)
+    # An existing completion is an override, not a create — the router 409s on this.
+    with pytest.raises(ValueError):
+        repo.create_manual_checkin(**args)
+    # And the refusal left no second audit row behind.
+    assert len(repo.list_task_audits(t1.id)) == 1
+
+
+def test_a_scanned_checkin_blocks_a_manual_one_for_the_same_week(repo):
+    _ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    stu = _student(repo)
+    repo.record_event_qr_checkin("csub", stu.id, mint_event_token(t1.id))
+    with pytest.raises(ValueError):
+        repo.create_manual_checkin(
+            campus_id="csub", task=t1, student=stu, actor_subject="admin", reason="r"
+        )
+
+
+def test_get_and_list_checkins_for_a_task(repo):
+    _ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    alice = _student(repo, "alice@csub.edu")
+    bob = _student(repo, "bob@csub.edu")
+    a = repo.create_manual_checkin(
+        campus_id="csub", task=t1, student=alice, actor_subject="admin", reason="r"
+    )
+    repo.create_manual_checkin(
+        campus_id="csub", task=t1, student=bob, actor_subject="admin", reason="r"
+    )
+
+    assert repo.get_checkin(t1.id, a.id).student_id == alice.id
+    assert repo.get_checkin(t1.id, 99999) is None
+
+    pairs = repo.list_task_checkins(t1.id)
+    assert len(pairs) == 2
+    # Each check-in is paired with its own student, for subject display.
+    assert {s.sso_subject for _c, s in pairs} == {"alice@csub.edu", "bob@csub.edu"}
+    for c, s in pairs:
+        assert c.student_id == s.id
+
+
+def test_correct_checkin_records_prior_and_new_state(repo):
+    _ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    stu = _student(repo)
+    repo.record_event_qr_checkin("csub", stu.id, mint_event_token(t1.id))
+    checkin = repo.list_task_checkins(t1.id)[0][0]
+    assert checkin.method == "event_qr"
+
+    updated = repo.correct_checkin(
+        campus_id="csub",
+        checkin=checkin,
+        student=stu,
+        actor_subject="admin@csub.edu",
+        reason="Scanned on the wrong device",
+        method="staff",
+    )
+    assert updated.method == "staff"
+    assert updated.verified_by == "admin@csub.edu"
+    assert repo.get_checkin(t1.id, checkin.id).method == "staff"
+
+    audit = repo.list_task_audits(t1.id)[0]
+    assert audit.action == "update"
+    assert audit.prior_state["method"] == "event_qr"
+    assert audit.new_state["method"] == "staff"
+
+
+def test_remove_checkin_keeps_the_prior_state_in_the_ledger(repo):
+    _ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    stu = _student(repo)
+    checkin = repo.create_manual_checkin(
+        campus_id="csub", task=t1, student=stu, actor_subject="admin", reason="r"
+    )
+
+    repo.remove_checkin(
+        campus_id="csub",
+        checkin=checkin,
+        student=stu,
+        actor_subject="admin@csub.edu",
+        reason="Recorded against the wrong student",
+    )
+    assert repo.get_checkin(t1.id, checkin.id) is None
+    assert repo.list_task_checkins(t1.id) == []
+    # The week is incomplete again...
+    assert [w.status for w in repo.build_passport("csub", stu.id).weeks] == ["available"]
+
+    # ...but the ledger still says it happened, and what it looked like.
+    audit = repo.list_task_audits(t1.id)[0]
+    assert audit.action == "delete"
+    assert audit.new_state is None
+    assert audit.prior_state["student_subject"] == "stu@csub.edu"
+    assert audit.prior_state["method"] == "manual"
+
+
+def test_the_ledger_is_newest_first_and_filterable_by_student(repo):
+    _ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    alice = _student(repo, "alice@csub.edu")
+    bob = _student(repo, "bob@csub.edu")
+    a = repo.create_manual_checkin(
+        campus_id="csub", task=t1, student=alice, actor_subject="admin", reason="first"
+    )
+    repo.create_manual_checkin(
+        campus_id="csub", task=t1, student=bob, actor_subject="admin", reason="second"
+    )
+    repo.remove_checkin(
+        campus_id="csub",
+        checkin=a,
+        student=alice,
+        actor_subject="admin",
+        reason="third",
+    )
+
+    assert [x.reason for x in repo.list_task_audits(t1.id)] == [
+        "third",
+        "second",
+        "first",
+    ]
+    assert [x.reason for x in repo.list_task_audits(t1.id, alice.id)] == [
+        "third",
+        "first",
+    ]
+
+
+def test_a_refused_checkin_leaves_no_orphan_audit_row(repo):
+    """The FR-D6 invariant: the check-in and its audit row move together.
+
+    services/checkins.py calls this load-bearing — a completion must never change
+    without leaving a trace, and equally no trace may claim a change that never
+    happened. SQL gets it from one commit; Dynamo needs TransactWriteItems, and a
+    naive two-put port would half-apply here and the ledger would quietly lie.
+    """
+    _ch, (t1,) = _built_challenge(repo, titles=("Week 1",))
+    stu = _student(repo)
+    repo.create_manual_checkin(
+        campus_id="csub", task=t1, student=stu, actor_subject="admin", reason="real"
+    )
+
+    with pytest.raises(ValueError):
+        repo.create_manual_checkin(
+            campus_id="csub",
+            task=t1,
+            student=stu,
+            actor_subject="admin",
+            reason="never happened",
+        )
+
+    # Exactly one check-in, exactly one audit row: the refused write rolled back
+    # whole, rather than leaving its audit row behind.
+    assert len(repo.list_task_checkins(t1.id)) == 1
+    audits = repo.list_task_audits(t1.id)
+    assert len(audits) == 1
+    assert audits[0].reason == "real"
+    assert "never happened" not in [a.reason for a in audits]
+
+
 # --- themes (FR-B4 / US-13) -------------------------------------------------
 def test_theme_create_get_and_list_sorted_by_name(repo):
     assert repo.list_themes() == []
