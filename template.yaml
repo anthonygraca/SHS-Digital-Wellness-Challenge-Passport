@@ -112,6 +112,10 @@ Resources:
         # admin's re-skin shows up on the student's next fetch (FR-B4 / US-13).
         - DynamoDBReadPolicy:
             TableName: !Sub "${TablePrefix}Themes"
+        # The scan route records the tip it hands out, and /api/content-views records
+        # a week being opened (FR-F3 / US-23) — both write-only from here.
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}ContentViews"
       Events:
         Passport:
           Type: HttpApi
@@ -147,6 +151,9 @@ Resources:
             TableName: !Sub "${TablePrefix}CheckInAudits"
         - DynamoDBReadPolicy:
             TableName: !Sub "${TablePrefix}Students"
+        # FR-E5 score override: read the responses, write the corrected score.
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}AssessmentResponses"
       Events:
         Challenges:
           Type: HttpApi
@@ -157,6 +164,41 @@ Resources:
           Type: HttpApi
           Properties:
             Path: /api/challenges
+            Method: ANY
+
+  AssessmentsFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.functions.assessments.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}AssessmentResponses"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}Counters"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Challenges"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Tasks"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}AssessmentItems"
+      Events:
+        Assessments:
+          Type: HttpApi
+          Properties:
+            Path: /api/assessments/{proxy+}
+            Method: ANY
+
+  # The guide holds no data at all — routers/guide.py takes no db and writes no
+  # transcript, deliberately (see its docstring). So: no table, no policy.
+  GuideFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.functions.guide.handler
+      Events:
+        Guide:
+          Type: HttpApi
+          Properties:
+            Path: /api/guide/{proxy+}
             Method: ANY
 
   ThemesFn:
@@ -383,6 +425,69 @@ Resources:
       KeySchema:
         - AttributeName: name
           KeyType: HASH
+
+  # One student's answer to one assessment item (FR-E4 / FR-E5). The key IS
+  # uq_response_student_item, so the one-attempt rule is the write itself rather than
+  # a check racing it.
+  AssessmentResponsesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TablePrefix}AssessmentResponses"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: student_id
+          AttributeType: S
+        - AttributeName: assessment_item_id
+          AttributeType: N
+        - AttributeName: challenge_id
+          AttributeType: N
+        - AttributeName: ts
+          AttributeType: S
+      KeySchema:
+        - AttributeName: student_id
+          KeyType: HASH
+        - AttributeName: assessment_item_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        # ByItem: the admin's "show me every answer to this question" (FR-E5).
+        - IndexName: ByItem
+          KeySchema:
+            - AttributeName: assessment_item_id
+              KeyType: HASH
+            - AttributeName: ts
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # ByChallenge: the learning-outcome report's per-challenge read (FR-F4, PR 6).
+        - IndexName: ByChallenge
+          KeySchema:
+            - AttributeName: challenge_id
+              KeyType: HASH
+            - AttributeName: ts
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # A student looking at content (FR-F3 / US-23). Partitioned by challenge because the
+  # only read is the engagement report's per-challenge count; nothing fetches one view
+  # by id, so there is no GSI. The sort key's uuid suffix is what implements "no unique
+  # constraint" — a week is completed once but may be read any number of times, and
+  # re-reading is engagement rather than a duplicate.
+  ContentViewsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TablePrefix}ContentViews"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: challenge_id
+          AttributeType: N
+        - AttributeName: view_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: challenge_id
+          KeyType: HASH
+        - AttributeName: view_id
+          KeyType: RANGE
 
   # Global re-skin presets (FR-B4 / US-13). The id is a slug that doubles as the
   # frontend data-theme value; the row is looked up by id on every passport build

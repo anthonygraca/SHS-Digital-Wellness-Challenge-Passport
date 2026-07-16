@@ -10,22 +10,24 @@ already holds a resolved Task, so re-deriving it from a week number would be a
 second query and a second chance to disagree. The content-view route holds only
 what a student's browser told it, so it resolves — and that resolution *is* the
 campus check.
+
+Persistence-agnostic: both take a ``Repository``, so the resolution rule above runs
+identically on either backend.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING
 
-from app.models.challenge import Task
-from app.models.engagement import ContentView
 from app.schemas.engagement import ContentRef
-from app.services.challenges import get_active_challenge_for_campus
+
+if TYPE_CHECKING:
+    from app.repositories.base import Repository, StudentId
 
 
 def record_content_view_for_task(
-    db: Session, *, student_id: int, task: Task, content_ref: ContentRef
-) -> ContentView:
+    repo: Repository, *, student_id: StudentId, task, content_ref: ContentRef
+) -> None:
     """Record a view of content belonging to an already-resolved task.
 
     The caller vouches for the task — that it exists, and that it belongs to this
@@ -33,42 +35,31 @@ def record_content_view_for_task(
     a Task that record_event_qr_checkin already validated against the campus's
     active challenge.
     """
-    view = ContentView(student_id=student_id, task_id=task.id, content_ref=content_ref)
-    db.add(view)
-    db.commit()
-    return view
+    repo.record_content_view(student_id=student_id, task=task, content_ref=content_ref)
 
 
 def record_content_view(
-    db: Session, *, campus_id: str, student_id: int, week_no: int, content_ref: ContentRef
-) -> ContentView | None:
+    repo: Repository,
+    *,
+    campus_id: str,
+    student_id: StudentId,
+    week_no: int,
+    content_ref: ContentRef,
+) -> bool:
     """Record a view of a week's content, resolving the week for the caller.
 
-    Returns None when the campus has no active challenge or no week sits at
+    Returns False when the campus has no active challenge or no week sits at
     ``week_no`` — the route turns that into a 404. Resolving against the campus's
     own active challenge is the isolation boundary: a student cannot post a view
     of a week that is not theirs to see, whatever number they send.
-
-    Resolves the week to a task by position, including the ``.first()``: positions
-    are kept gapless and unique by the reorder service but no DB constraint enforces
-    it, and a duplicate must not turn this into a 500.
     """
-    challenge = get_active_challenge_for_campus(db, campus_id)
+    challenge = repo.get_active_challenge(campus_id)
     if challenge is None:
-        return None
+        return False
 
-    task = (
-        db.execute(
-            select(Task)
-            .where(Task.challenge_id == challenge.id, Task.position == week_no)
-            .order_by(Task.id)
-        )
-        .scalars()
-        .first()
-    )
+    task = repo.get_task_by_position(challenge.id, week_no)
     if task is None:
-        return None
+        return False
 
-    return record_content_view_for_task(
-        db, student_id=student_id, task=task, content_ref=content_ref
-    )
+    repo.record_content_view(student_id=student_id, task=task, content_ref=content_ref)
+    return True

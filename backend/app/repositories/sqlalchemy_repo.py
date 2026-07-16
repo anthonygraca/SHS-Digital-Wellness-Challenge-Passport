@@ -8,9 +8,17 @@ ORM rows (structurally interchangeable with the DTOs the Dynamo repo returns).
 
 from __future__ import annotations
 
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.challenge import Challenge, Task
+from app.models.challenge import (
+    AssessmentItem,
+    AssessmentResponse,
+    Challenge,
+    Task,
+)
+from app.models.engagement import ContentView
 from app.models.student import Student
 from app.schemas.challenge import (
     AssessmentItemUpdate,
@@ -176,6 +184,120 @@ class SqlAlchemyRepository:
             actor_subject=actor_subject,
             reason=reason,
         )
+
+    # --- Assessments + engagement (FR-E4/E5, US-23) -------------------------
+    def get_task_by_position(self, challenge_id: int, position: int):
+        return (
+            self.db.execute(
+                select(Task)
+                .where(Task.challenge_id == challenge_id, Task.position == position)
+                .order_by(Task.id)
+            )
+            .scalars()
+            .first()
+        )
+
+    def get_item_in_challenge(self, challenge_id: int, item_id: int):
+        return self.db.execute(
+            select(AssessmentItem)
+            .join(Task, Task.id == AssessmentItem.task_id)
+            .where(AssessmentItem.id == item_id, Task.challenge_id == challenge_id)
+        ).scalar_one_or_none()
+
+    def get_response(self, student_id, item_id: int):
+        return self.db.execute(
+            select(AssessmentResponse).where(
+                AssessmentResponse.student_id == student_id,
+                AssessmentResponse.assessment_item_id == item_id,
+            )
+        ).scalar_one_or_none()
+
+    def get_responses_for_items(self, student_id, item_ids: list[int]):
+        if not item_ids:
+            return {}
+        rows = (
+            self.db.execute(
+                select(AssessmentResponse).where(
+                    AssessmentResponse.student_id == student_id,
+                    AssessmentResponse.assessment_item_id.in_(item_ids),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return {r.assessment_item_id: r for r in rows}
+
+    def create_response(
+        self,
+        *,
+        student_id,
+        item,
+        challenge_id: int,
+        response: str,
+        score: float,
+        scored_by: str,
+        ai_feedback: str | None = None,
+    ):
+        # challenge_id is unused here — it exists for the Dynamo path's ByChallenge
+        # index; on SQL the response reaches its challenge through the item's task.
+        row = AssessmentResponse(
+            student_id=student_id,
+            assessment_item_id=item.id,
+            response=response,
+            score=score,
+            scored_by=scored_by,
+            ai_feedback=ai_feedback,
+        )
+        self.db.add(row)
+        try:
+            self.db.commit()
+        except IntegrityError:
+            # uq_response_student_item — the student already answered.
+            self.db.rollback()
+            return None
+        self.db.refresh(row)
+        return row
+
+    def list_item_responses(self, item_id: int):
+        rows = self.db.execute(
+            select(AssessmentResponse, Student)
+            .join(Student, Student.id == AssessmentResponse.student_id)
+            .where(AssessmentResponse.assessment_item_id == item_id)
+            .order_by(AssessmentResponse.ts.desc())
+        ).all()
+        return [(response, student) for response, student in rows]
+
+    def get_item_response(self, item_id: int, response_id: int):
+        return self.db.execute(
+            select(AssessmentResponse).where(
+                AssessmentResponse.id == response_id,
+                AssessmentResponse.assessment_item_id == item_id,
+            )
+        ).scalar_one_or_none()
+
+    def override_response_score(self, response, score: float):
+        response.score = score
+        response.scored_by = "human"
+        self.db.commit()
+        self.db.refresh(response)
+        return response
+
+    def record_content_view(self, *, student_id, task, content_ref: str) -> None:
+        self.db.add(
+            ContentView(student_id=student_id, task_id=task.id, content_ref=content_ref)
+        )
+        self.db.commit()
+
+    def count_content_views(self, challenge_id: int) -> dict[str, int]:
+        # ContentView reaches its challenge through the task, exactly as CheckIn does —
+        # that join is what keeps another campus's rows out of the count.
+        rows = self.db.execute(
+            select(ContentView.content_ref, func.count())
+            .join(Task, Task.id == ContentView.task_id)
+            .where(Task.challenge_id == challenge_id)
+            .group_by(ContentView.content_ref)
+        ).all()
+        return {ref: count for ref, count in rows}
 
     # --- Themes -------------------------------------------------------------
     def list_themes(self):

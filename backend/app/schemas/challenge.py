@@ -333,7 +333,8 @@ class AssessmentResponseOut(BaseModel):
     """
 
     id: int
-    student_id: int
+    # See CheckInOut.student_id — int on SQL, "<campus>#<sso>" on Dynamo.
+    student_id: int | str
     student_subject: str
     response: str
     score: float

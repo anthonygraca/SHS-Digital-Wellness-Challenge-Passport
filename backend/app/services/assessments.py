@@ -1,16 +1,21 @@
+"""Knowledge checks: MCQ auto-scoring (FR-E4) and reflection scoring (FR-E5).
+
+Persistence-agnostic: every function takes a ``Repository`` rather than a Session, so
+the scoring rules — which answer is correct, what a score may be, which refusal wins —
+exist once and run identically on SQLite and DynamoDB. The repository supplies only the
+reads and writes; the judgement lives here.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
-
-from app.models.challenge import AssessmentItem, AssessmentResponse, Task
-from app.models.student import Student
-from app.services.challenges import get_active_challenge_for_campus
 from app.services.reflection_scoring import ReflectionScorer, ScoringUnavailable
+
+if TYPE_CHECKING:
+    from app.repositories.base import Repository, StudentId
 
 # An MCQ is all-or-nothing: it has exactly one keyed option. The float range is
 # shared with the FR-E5 rubric scoring, which lands between these two.
@@ -103,9 +108,7 @@ class KnowledgeCheckItemView:
     your_response: StoredResponseView | None
 
 
-def _stored_view(
-    response: AssessmentResponse | None, *, item_type: str
-) -> StoredResponseView | None:
+def _stored_view(response, *, item_type: str) -> StoredResponseView | None:
     if response is None:
         return None
     return StoredResponseView(
@@ -119,7 +122,7 @@ def _stored_view(
 
 
 def list_week_items(
-    db: Session, *, campus_id: str, student_id: int, week_no: int
+    repo: Repository, *, campus_id: str, student_id: StudentId, week_no: int
 ) -> list[KnowledgeCheckItemView] | None:
     """The assessment items on one week of the campus's active challenge, with answers.
 
@@ -131,39 +134,19 @@ def list_week_items(
     surface to render on and a scorer to grade them with; the caller tells them apart by
     ``item_type`` rather than by guessing from an empty ``options``.
     """
-    challenge = get_active_challenge_for_campus(db, campus_id)
+    challenge = repo.get_active_challenge(campus_id)
     if challenge is None:
         return None
 
-    task = db.execute(
-        select(Task).where(Task.challenge_id == challenge.id, Task.position == week_no)
-    ).scalar_one_or_none()
+    task = repo.get_task_by_position(challenge.id, week_no)
     if task is None:
         return None
 
-    items = (
-        db.execute(
-            select(AssessmentItem)
-            .where(AssessmentItem.task_id == task.id)
-            .order_by(AssessmentItem.id)
-        )
-        .scalars()
-        .all()
-    )
+    items = sorted(repo.list_items(task.id), key=lambda i: i.id)
     if not items:
         return []
 
-    responses = {
-        r.assessment_item_id: r
-        for r in db.execute(
-            select(AssessmentResponse).where(
-                AssessmentResponse.student_id == student_id,
-                AssessmentResponse.assessment_item_id.in_([i.id for i in items]),
-            )
-        )
-        .scalars()
-        .all()
-    }
+    responses = repo.get_responses_for_items(student_id, [i.id for i in items])
 
     return [
         KnowledgeCheckItemView(
@@ -179,28 +162,26 @@ def list_week_items(
     ]
 
 
-def _item_in_active_challenge(
-    db: Session, *, campus_id: str, item_id: int
-) -> AssessmentItem | None:
+def _item_in_active_challenge(repo: Repository, *, campus_id: str, item_id: int):
     """Load an item only if it sits in the campus's active published challenge.
 
-    The join through Task -> Challenge *is* the campus isolation, and it is why the
+    Returns ``(challenge, item)``; ``item`` is None when there is no such item here.
+    The challenge comes back too because the write path needs its id and this call has
+    already paid for resolving it.
+
+    Scoping the item to the challenge *is* the campus isolation, and it is why the
     caller can 404 rather than 403: an item id belonging to another campus, or to a
     draft challenge, is indistinguishable from one that does not exist — which is the
     intended answer, since existence is itself not the student's to learn.
     """
-    challenge = get_active_challenge_for_campus(db, campus_id)
+    challenge = repo.get_active_challenge(campus_id)
     if challenge is None:
-        return None
-    return db.execute(
-        select(AssessmentItem)
-        .join(Task, Task.id == AssessmentItem.task_id)
-        .where(AssessmentItem.id == item_id, Task.challenge_id == challenge.id)
-    ).scalar_one_or_none()
+        return None, None
+    return challenge, repo.get_item_in_challenge(challenge.id, item_id)
 
 
 def score_mcq(
-    db: Session, *, campus_id: str, student_id: int, item_id: int, answer: str
+    repo: Repository, *, campus_id: str, student_id: StudentId, item_id: int, answer: str
 ) -> ScoredResponse:
     """Auto-score an MCQ submission against its answer key (FR-E4 / US-18).
 
@@ -209,7 +190,9 @@ def score_mcq(
     ``ItemNotFound`` (absent, foreign, or draft), ``NotAnMCQ``, ``UnknownOption``, or
     ``DuplicateResponse``.
     """
-    item = _item_in_active_challenge(db, campus_id=campus_id, item_id=item_id)
+    challenge, item = _item_in_active_challenge(
+        repo, campus_id=campus_id, item_id=item_id
+    )
     if item is None:
         raise ItemNotFound
 
@@ -224,33 +207,24 @@ def score_mcq(
     if answer not in options:
         raise UnknownOption
 
-    existing = db.execute(
-        select(AssessmentResponse).where(
-            AssessmentResponse.student_id == student_id,
-            AssessmentResponse.assessment_item_id == item.id,
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
+    if repo.get_response(student_id, item.id) is not None:
         raise DuplicateResponse
 
     correct = answer == item.answer_key
     score = CORRECT_SCORE if correct else INCORRECT_SCORE
 
-    db.add(
-        AssessmentResponse(
-            student_id=student_id,
-            assessment_item_id=item.id,
-            response=answer,
-            score=score,
-            scored_by="auto",
-        )
+    stored = repo.create_response(
+        student_id=student_id,
+        item=item,
+        challenge_id=challenge.id,
+        response=answer,
+        score=score,
+        scored_by="auto",
     )
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        # Two submissions racing the check above; the constraint is the real arbiter.
-        db.rollback()
-        raise DuplicateResponse from exc
+    # Two submissions racing the check above; the write's own constraint is the real
+    # arbiter, on either backend (a unique index here, a conditional put there).
+    if stored is None:
+        raise DuplicateResponse
 
     return ScoredResponse(
         item_id=item.id,
@@ -264,10 +238,10 @@ def score_mcq(
 
 
 def score_reflection(
-    db: Session,
+    repo: Repository,
     *,
     campus_id: str,
-    student_id: int,
+    student_id: StudentId,
     item_id: int,
     text: str,
     scorer: ReflectionScorer,
@@ -283,11 +257,13 @@ def score_reflection(
     a fake without patching — the codebase has no monkeypatch anywhere, and this does not
     introduce the first one.
 
-    Note where ``db.add`` sits: every refusal above it returns before the session is
-    touched, so "a failed scoring stores nothing" is a property of the ordering rather
-    than a promise the code makes. That matters because a reflection is one attempt.
+    Note where the write sits: every refusal above it returns before anything is stored,
+    so "a failed scoring stores nothing" is a property of the ordering rather than a
+    promise the code makes. That matters because a reflection is one attempt.
     """
-    item = _item_in_active_challenge(db, campus_id=campus_id, item_id=item_id)
+    challenge, item = _item_in_active_challenge(
+        repo, campus_id=campus_id, item_id=item_id
+    )
     if item is None:
         raise ItemNotFound
 
@@ -301,13 +277,7 @@ def score_reflection(
     # real latency and real cost, and spending it on a submission we are about to refuse
     # is waste; worse, a scorer outage would then answer "we're down" to a student whose
     # actual answer is "you already did this".
-    existing = db.execute(
-        select(AssessmentResponse).where(
-            AssessmentResponse.student_id == student_id,
-            AssessmentResponse.assessment_item_id == item.id,
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
+    if repo.get_response(student_id, item.id) is not None:
         raise DuplicateResponse
 
     result = scorer.score(
@@ -324,22 +294,19 @@ def score_reflection(
     if not INCORRECT_SCORE <= result.score <= CORRECT_SCORE:
         raise ScoringUnavailable(f"Scorer returned {result.score!r}, outside 0.0..1.0")
 
-    db.add(
-        AssessmentResponse(
-            student_id=student_id,
-            assessment_item_id=item.id,
-            response=text,
-            score=result.score,
-            scored_by="auto",
-            ai_feedback=result.feedback,
-        )
+    stored = repo.create_response(
+        student_id=student_id,
+        item=item,
+        challenge_id=challenge.id,
+        response=text,
+        score=result.score,
+        scored_by="auto",
+        ai_feedback=result.feedback,
     )
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        # Two submissions racing the check above; the constraint is the real arbiter.
-        db.rollback()
-        raise DuplicateResponse from exc
+    # Two submissions racing the check above; the write's own constraint is the real
+    # arbiter, on either backend.
+    if stored is None:
+        raise DuplicateResponse
 
     return ScoredReflection(
         item_id=item.id,
@@ -361,42 +328,25 @@ def score_reflection(
 # ---------------------------------------------------------------------------
 
 
-def list_item_responses(
-    db: Session, item_id: int
-) -> list[tuple[AssessmentResponse, Student]]:
+def list_item_responses(repo: Repository, item_id: int):
     """Every response to one item, paired with its student for subject display.
 
     Returns tuples for the same reason ``list_task_checkins`` does: the only student
     identifier the admin surface shows lives on the Student row, not this one.
     """
-    rows = db.execute(
-        select(AssessmentResponse, Student)
-        .join(Student, Student.id == AssessmentResponse.student_id)
-        .where(AssessmentResponse.assessment_item_id == item_id)
-        .order_by(AssessmentResponse.ts.desc())
-    ).all()
-    return [(response, student) for response, student in rows]
+    return repo.list_item_responses(item_id)
 
 
-def get_item_response(
-    db: Session, item_id: int, response_id: int
-) -> AssessmentResponse | None:
+def get_item_response(repo: Repository, item_id: int, response_id: int):
     """One response, scoped to the item it belongs to.
 
     The item_id filter is what makes a response id from another item a 404 rather than
     an override applied to the wrong question.
     """
-    return db.execute(
-        select(AssessmentResponse).where(
-            AssessmentResponse.id == response_id,
-            AssessmentResponse.assessment_item_id == item_id,
-        )
-    ).scalar_one_or_none()
+    return repo.get_item_response(item_id, response_id)
 
 
-def override_response_score(
-    db: Session, response: AssessmentResponse, score: float
-) -> AssessmentResponse:
+def override_response_score(repo: Repository, response, score: float):
     """Set a score by hand (FR-E5). ``scored_by`` becomes "human".
 
     ``ai_feedback`` is deliberately left alone. FR-E5 mandates no audit table — this
@@ -408,8 +358,4 @@ def override_response_score(
     The pair can read oddly — upbeat feedback beside a hand-set 0.2 — but that is a
     labelling problem for the UI, not a reason to delete evidence.
     """
-    response.score = score
-    response.scored_by = "human"
-    db.commit()
-    db.refresh(response)
-    return response
+    return repo.override_response_score(response, score)
