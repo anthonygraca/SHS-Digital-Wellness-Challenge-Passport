@@ -9,7 +9,16 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.db import init_db
-from app.routers import auth, challenges, enrollment, passport
+from app.routers import (
+    assessments,
+    auth,
+    challenges,
+    enrollment,
+    guide,
+    passport,
+    reports,
+    themes,
+)
 
 # Built SPA lives at repo-root/frontend/dist. main.py is backend/app/main.py, so
 # the repo root is parents[2]. Resolved from __file__ (not cwd) so it works no
@@ -33,6 +42,10 @@ app.include_router(auth.router)
 app.include_router(enrollment.router)
 app.include_router(challenges.router)
 app.include_router(passport.router)
+app.include_router(assessments.router)
+app.include_router(reports.router)
+app.include_router(themes.router)
+app.include_router(guide.router)
 
 
 @app.get("/healthz")

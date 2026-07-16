@@ -7,6 +7,7 @@ import { enroll, fetchEnrollmentStatus } from "../../api/enrollment";
 import type { EnrollmentStatus } from "../../types/enrollment";
 import { EligibilityBlocked } from "../EligibilityBlocked/EligibilityBlocked";
 import { NoActiveChallenge } from "../NoActiveChallenge/NoActiveChallenge";
+import { useThemeCopy } from "../../theme/ThemeProvider";
 import styles from "./Landing.module.css";
 
 /**
@@ -27,6 +28,9 @@ import styles from "./Landing.module.css";
  */
 export function Landing() {
   const { session, loading, signOut } = useSession();
+  // Themed copy (US-13). The palette lands once the passport is fetched, so this
+  // pre-enrollment screen shows the default skin's title.
+  const { appTitle } = useThemeCopy();
   const [status, setStatus] = useState<EnrollmentStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [statusFailed, setStatusFailed] = useState(false);
@@ -123,6 +127,7 @@ export function Landing() {
   return (
     <main className={styles.center}>
       <div className={styles.card}>
+        <p className={styles.appTitle}>{appTitle}</p>
         <h1 className={styles.heading}>You're signed in</h1>
         <p className={styles.line}>
           Signed in as <strong>{session.affiliation}</strong>

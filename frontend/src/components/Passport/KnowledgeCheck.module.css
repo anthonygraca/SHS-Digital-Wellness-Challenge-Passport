@@ -1,0 +1,344 @@
+/*
+ * The assessment inside the week sheet — MCQs (US-18 / FR-E4) and reflections
+ * (US-19 / FR-E5).
+ *
+ * Correct is --wp-tertiary, which is already this app's success colour: completed
+ * week tiles and the "Checked in" button both use it, so a right answer reads the
+ * same as any other thing that went well. --wp-primary is the *action* colour here
+ * (the submit button, the current selection) and would say "do this" rather than
+ * "you got it". Every colour below is a theme token, so a semester re-skin (US-13)
+ * carries the quiz with it and no value is hardcoded.
+ *
+ * A reflection score deliberately borrows neither: it is a fraction, not a verdict, so
+ * painting 40% in the failure colour would be this stylesheet inventing a pass mark that
+ * FR-E5 never defines. The score tile stays neutral and states the number.
+ */
+
+.section {
+  margin: 0 0 22px;
+}
+
+.heading {
+  font-family: var(--wp-font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--wp-on-surface-variant);
+  margin: 0 0 10px;
+}
+
+.card {
+  background: var(--wp-surface-container);
+  border-radius: 20px;
+  padding: 16px;
+}
+
+.card + .card {
+  margin-top: 12px;
+}
+
+/* --wp-secondary / --wp-on-secondary, not the mockup's --wp-secondary-container
+   pairing: the container tokens are part of the fuller Material 3 set the mockup
+   draws on, and this app's themes (theme/tokens.css, services/seed.py) do not
+   define them. An undefined custom property is not a fallback, it is nothing. */
+.tag {
+  display: inline-block;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: var(--wp-secondary);
+  color: var(--wp-on-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+/* Reset the browser's default fieldset chrome; the card supplies the frame. */
+.fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prompt {
+  padding: 0;
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--wp-on-surface);
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* 44px min touch target — these are the primary tap surface on a phone. */
+  min-height: 44px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--wp-outline-variant);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--wp-on-surface);
+  cursor: pointer;
+}
+
+/* An inset ring rather than a thicker border: a 1px→2px swap on selection would
+   reflow the row's text by a pixel every time the student changes their mind. */
+.option[data-selected="true"] {
+  background: var(--wp-primary-container);
+  color: var(--wp-on-primary-container);
+  border-color: var(--wp-primary);
+  box-shadow: inset 0 0 0 1px var(--wp-primary);
+}
+
+.option[data-verdict="correct"] {
+  background: color-mix(in srgb, var(--wp-tertiary) 16%, var(--wp-surface-container));
+  color: var(--wp-on-surface);
+  border-color: var(--wp-tertiary);
+  box-shadow: inset 0 0 0 1px var(--wp-tertiary);
+}
+
+.option[data-verdict="incorrect"] {
+  background: var(--wp-error-container);
+  color: var(--wp-on-error-container);
+  border-color: var(--wp-error-container);
+  box-shadow: none;
+}
+
+.option input {
+  /* The native radio keeps keyboard and screen-reader behaviour; accent-color is
+     enough to make it look at home without rebuilding it. */
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--wp-primary);
+}
+
+.option:focus-within {
+  outline: 3px solid var(--wp-primary);
+  outline-offset: 2px;
+}
+
+.fieldset:disabled .option {
+  cursor: default;
+}
+
+/* An answered question is closed, not broken — keep the verdict at full contrast
+   rather than letting the disabled fieldset grey it out. */
+.fieldset:disabled .option[data-selected="false"] {
+  opacity: 0.55;
+}
+
+.submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 48px;
+  margin-top: 14px;
+  padding: 0 24px;
+  border: none;
+  border-radius: 24px;
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.submit:focus-visible {
+  outline: 3px solid var(--wp-on-primary);
+  outline-offset: -6px;
+}
+
+.result {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.result[data-correct="true"] {
+  background: color-mix(in srgb, var(--wp-tertiary) 16%, var(--wp-surface-container));
+  color: var(--wp-on-surface);
+}
+
+.result[data-correct="false"] {
+  background: var(--wp-error-container);
+  color: var(--wp-on-error-container);
+}
+
+.resultIcon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  line-height: 1;
+  margin-top: 1px;
+}
+
+.result[data-correct="true"] .resultIcon {
+  color: var(--wp-tertiary);
+}
+
+.resultHeading {
+  display: block;
+  font-weight: 700;
+}
+
+.resultFeedback {
+  display: block;
+  margin-top: 2px;
+}
+
+.error {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--wp-error-container);
+  color: var(--wp-on-error-container);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* ---------------------------------------------------------------------------
+   Reflection (US-19 / FR-E5)
+   --------------------------------------------------------------------------- */
+
+.textareaLabel {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--wp-on-surface-variant);
+  margin-bottom: 6px;
+}
+
+.textarea {
+  display: block;
+  width: 100%;
+  /* Roughly four lines on a phone: enough that the box invites a paragraph rather
+     than a sentence, without pushing the submit button off a short screen. */
+  min-height: 96px;
+  padding: 12px 14px;
+  border: 1px solid var(--wp-outline-variant);
+  border-radius: 12px;
+  background: var(--wp-surface);
+  color: var(--wp-on-surface);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  /* Vertical only: a horizontally resizable box can be dragged past the viewport on
+     a phone, and there is nothing to gain from a wider one. */
+  resize: vertical;
+}
+
+.textarea:focus-visible {
+  outline: 3px solid var(--wp-primary);
+  outline-offset: 2px;
+}
+
+.textarea:disabled {
+  opacity: 0.6;
+}
+
+.counter {
+  display: block;
+  margin-top: 6px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--wp-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The student's own words, read back on a re-visit. Quoted rather than boxed like an
+   input, so it does not read as still-editable. */
+.written {
+  margin: 0 0 14px;
+  padding-left: 12px;
+  border-left: 3px solid var(--wp-outline-variant);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--wp-on-surface-variant);
+  white-space: pre-wrap;
+  /* A reflection can be up to 4000 characters, and an unbroken URL or a pasted string
+     with no spaces would otherwise widen the card past the viewport. */
+  overflow-wrap: anywhere;
+}
+
+.scoreTile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--wp-surface);
+}
+
+.scoreValue {
+  font-family: var(--wp-font-display);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--wp-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.scoreLabel {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+}
+
+/* --wp-secondary rather than the mockup's --wp-secondary-container, for the reason
+   given above .tag: this app's themes do not define the container tokens. */
+.guide {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--wp-secondary);
+  color: var(--wp-on-secondary);
+}
+
+.guideHeading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.guideBody {
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.guideOutcome {
+  margin-top: 10px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .option,
+  .submit {
+    transition: none;
+  }
+}

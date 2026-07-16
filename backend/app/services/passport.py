@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.challenge import CheckIn, Task
+from app.models.theme import Theme
 from app.services.challenges import get_active_challenge_for_campus
 from app.services.qr import verify_event_token
 
@@ -30,9 +31,27 @@ class WeekView:
 
 
 @dataclass
+class ThemeConfigView:
+    """The challenge's theme resolved to everything the app needs to skin itself.
+
+    Sending the resolved config (not just the id) is what makes a re-skin pure
+    configuration — the student app never ships per-theme code (FR-B4 / NFR-6).
+    """
+
+    id: str
+    palette: dict[str, str]
+    logo_url: str | None
+    hero_url: str | None
+    app_title: str
+    tagline: str
+    copy_tone: str
+
+
+@dataclass
 class PassportView:
     challenge_name: str
     theme: str
+    theme_config: ThemeConfigView | None
     total_weeks: int
     completed_weeks: int
     remaining_weeks: int
@@ -40,6 +59,29 @@ class PassportView:
     required_completed: int
     prize_eligible: bool
     weeks: list[WeekView]
+
+
+def _resolve_theme(db: Session, theme_id: str) -> ThemeConfigView | None:
+    """Load the challenge's theme row, or None for the default/unknown theme.
+
+    Resolved on every request, so an admin's edit shows up on the student's next
+    fetch with no cache to invalidate (US-13 scenario 3). An empty or dangling
+    ``theme_id`` degrades to the app's default skin rather than erroring.
+    """
+    if not theme_id:
+        return None
+    theme = db.get(Theme, theme_id)
+    if theme is None:
+        return None
+    return ThemeConfigView(
+        id=theme.id,
+        palette=dict(theme.palette or {}),
+        logo_url=theme.logo_url,
+        hero_url=theme.hero_url,
+        app_title=theme.app_title,
+        tagline=theme.tagline,
+        copy_tone=theme.copy_tone,
+    )
 
 
 def build_passport(
@@ -82,11 +124,17 @@ def build_passport(
         theme=challenge.theme_id,
         tasks=tasks,
         completed_ids=completed_ids,
+        theme_config=_resolve_theme(db, challenge.theme_id),
     )
 
 
 def assemble_passport(
-    *, challenge_name: str, theme: str, tasks: list, completed_ids: set
+    *,
+    challenge_name: str,
+    theme: str,
+    tasks: list,
+    completed_ids: set,
+    theme_config: ThemeConfigView | None = None,
 ) -> PassportView:
     """Pure derivation of the passport view from a challenge's tasks + completions.
 
@@ -95,6 +143,10 @@ def assemble_passport(
     ``completed_ids`` is the set of the student's completed task ids (already scoped
     to these tasks). Both persistence backends call this so the sequential-unlock and
     prize-eligibility rules live in exactly one place.
+
+    ``theme_config`` is resolved by the caller (SQL: :func:`_resolve_theme`; Dynamo:
+    a Themes point-read) and threaded through unchanged, so this stays free of any
+    persistence dependency while still carrying the resolved skin (FR-B4 / US-13).
     """
     weeks: list[WeekView] = []
     available_assigned = False
@@ -136,6 +188,7 @@ def assemble_passport(
     return PassportView(
         challenge_name=challenge_name,
         theme=theme,
+        theme_config=theme_config,
         total_weeks=total,
         completed_weeks=completed,
         remaining_weeks=total - completed,

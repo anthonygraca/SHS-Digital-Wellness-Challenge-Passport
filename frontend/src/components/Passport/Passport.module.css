@@ -26,11 +26,41 @@
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
 }
 
+/* Themed branding (US-13): logo and app title come from the challenge's theme. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.logo {
+  height: 28px;
+  width: auto;
+  max-width: 40%;
+  object-fit: contain;
+}
+
+.appTitle {
+  font-family: var(--wp-font-display);
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wp-primary);
+}
+
 .eyebrow {
   margin: 0 0 4px;
   font-size: 13px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  color: var(--wp-on-surface-variant);
+}
+
+.tagline {
+  margin: -8px 0 16px;
+  font-size: 14px;
+  line-height: 1.4;
   color: var(--wp-on-surface-variant);
 }
 
@@ -444,6 +474,12 @@
 
 /* --- Sign out --- */
 
+/*
+ * Carries the crisis affordance as well as sign-out (FR-E3). It is the only chrome that
+ * survives every state of this route, which is what a safety affordance needs to be in.
+ * Wraps rather than shrinks: two buttons at 48px min-height do not fit side by side on a
+ * 320px viewport without dropping below the 44px touch floor.
+ */
 .signoutBar {
   position: fixed;
   bottom: 0;
@@ -451,7 +487,9 @@
   right: 0;
   z-index: 10;
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  gap: 10px;
   padding: 12px;
   background: color-mix(in srgb, var(--wp-surface) 88%, transparent);
   backdrop-filter: blur(6px);

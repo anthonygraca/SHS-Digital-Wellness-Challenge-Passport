@@ -37,6 +37,67 @@ friction for students. A **Progressive Web App** gives: install-to-home-screen, 
 scanning, push-capable, SSO in-browser, one codebase, instant updates. This is the pragmatic and
 correct choice.
 
+**As built (US-6 / FR-C4).** `vite-plugin-pwa` generates the service worker; the manifest lives in
+`frontend/src/pwa/manifest.ts` rather than inline in `vite.config.ts` so it is typechecked and
+assertable from a test. Four decisions in it are not readable off the code:
+
+**Icons are committed PNGs, not SVG, and not build output.** Chrome's install criteria want a 192x192
+and a 512x512. Declaring an SVG instead requires `sizes: "any"`, which is the configuration behind two
+open Chromium install bugs (40925759, 40911689) — the one option that reliably breaks installability.
+They are rasterised once from the `.svg` sources in `frontend/public/icons/` and committed as brand
+assets, so no dependency or CI step exists to rot:
+
+```
+cd frontend/public/icons
+rsvg-convert -w 192 -h 192 icon.svg          -o pwa-192.png
+rsvg-convert -w 512 -h 512 icon.svg          -o pwa-512.png
+rsvg-convert -w 512 -h 512 icon-maskable.svg -o pwa-maskable-512.png
+rsvg-convert -w 180 -h 180 icon.svg          -o apple-touch-icon-180.png
+```
+
+The maskable variant is scaled to 0.98 rather than filling the tile because the platform crops it to a
+guaranteed circle of 80% of the width: the mark's circumradius, not its bounding box, is what has to
+fit. `apple-touch-icon` is not redundant — iOS ignores manifest icons for the home screen entirely.
+
+**`start_url` is `/passport`, not `/`.** `/` routes through the landing, which fetches enrollment
+status unconditionally, so an offline launch from the home screen would open on "we couldn't load your
+challenge". The installed app's user is by definition a student mid-challenge. The cost is that
+`/passport` must redirect admins to `/admin` (staff would otherwise land on "not eligible to join"),
+and that an un-enrolled student who installs sees "no active challenge yet" with no route to the join
+CTA — accepted, as an un-enrolled student has no reason to install.
+
+**`workbox.navigateFallbackDenylist` is load-bearing, not hygiene.** `navigateFallback` defaults to
+`index.html`, and Workbox answers *any* navigation it handles with the precached shell. `/auth/login`
+is a top-level redirect into the SAML IdP, not a fetch, so without the denylist a live service worker
+serves it the SPA: the catch-all route bounces to `/` and the student is stranded on a sign-in button
+that does nothing. This was inert only while the manifest shipped `icons: []` and the app could never
+install — adding icons is what arms it. Verified by removing the denylist and watching sign-in break.
+
+**Offline data is a localStorage snapshot, not a Workbox runtime cache.** The service worker precaches
+only the app shell. `frontend/src/offline/snapshot.ts` stores the last session and passport; the
+consumers (`SessionProvider`, the `Passport` container) catch the rejected fetch and fall back. This
+splits cleanly from the SW — it is unit-testable in jsdom, where no service worker runs — and it keeps
+the *staleness* visible to the UI, which a transparent cache cannot express.
+
+Two invariants hold it together. **A snapshot only ever survives because we were offline:** the server
+is the authority on who is signed in, so an authoritative signed-out clears both keys, and sign-out
+clears them unconditionally whether or not the server could be reached — this is an SSO subject plus
+participation data on a phone students share (no PHI, but close enough to not leave lying around).
+And **only a successful fetch writes:** `fetchPassport` returns null for any `!res.ok` including a
+transient 500, so clearing on null would cost a student their offline passport over one blip.
+
+`navigator.onLine` drives only what we *say* — the banner and the refusal — never the fallback. It
+reports whether an interface exists, so a captive portal reports online while every fetch fails; the
+fallback keys off the rejected fetch instead, which cannot be fooled that way.
+
+**Check-ins are refused offline, never queued.** Deliberate, and not merely because the story says so:
+the server validates each QR token's freshness, so a scan replayed on reconnect would be rejected
+anyway — after the student had already been shown a completed week. A background-sync queue here would
+be a promise the system cannot keep. Do not add one.
+
+Known gap: the Roboto/Oswald/Cinzel stack loads from Google Fonts, so an offline passport falls back
+to system fonts. Cosmetic, and fixable with the standard Workbox font-caching recipe if it matters.
+
 ### 2.2 The QR check-in model  ✅
 Two directions exist; support the simple one first, keep the strong one as a config option.
 
@@ -124,7 +185,8 @@ back to Python if the camp team has no C# capability at all.
 
 ```
 Challenge(id, campus_id, name, theme_id, semester, starts_on, ends_on, status)
-Theme(id, name, palette_json, logo_key, hero_key, copy_tone)          -- R6 skinning
+Theme(id, name, palette_json, logo_url, hero_url,                     -- R6 skinning
+      app_title, tagline, copy_tone)
 Task(id, challenge_id, week_no, title, caption, activity_type,        -- R5 the "weeks"
      location, date_start, date_end, prize, is_required, order)
 QuizItem(id, task_id, kind[mcq|reflection], prompt, options_json,     -- R8 assessment
@@ -135,6 +197,9 @@ Enrollment(id, student_id, challenge_id, enrolled_at)
 
 CheckIn(id, student_id, task_id, ts, method[event_qr|staff|manual],   -- R4 replaces sticker/clicker
         verified_by)
+CheckInAudit(id, campus_id, student_id, task_id, checkin_id,          -- FR-D6 append-only ledger
+             action[create|update|delete], actor_subject, reason, ts,
+             prior_state_json, new_state_json)                         -- NO FKs; see below
 QuizResponse(id, student_id, quiz_item_id, response, score,           -- R8 auto-scored
              ai_feedback, scored_by[auto|human], ts)
 ContentView(id, student_id, task_id, content_ref, ts)                 -- engagement metric
@@ -147,6 +212,252 @@ Erika's "two students, same name" concern).
 
 **Prize eligibility is a query, not a flag** — derived from completion of required tasks, so it's
 always correct and auditable.
+
+**The audit ledger carries no foreign keys (FR-D6).** `CheckIn` stays the single source of truth for
+"is this complete?"; `CheckInAudit` is the append-only record of who changed it, when, why, and what
+it looked like before. It is deliberately *not* FK'd to `checkins`, `students`, or `tasks`: a check-in
+row is hard-deleted when an admin removes a completion, and students/tasks cascade-delete their
+dependents — so an FK could only cascade (destroying the very evidence FR-D6 exists to guarantee) or
+SET NULL (losing the correlation). `RESTRICT` would preserve the ledger but block legitimate task
+deletion. Instead each row carries a self-contained JSON snapshot (including the student's
+`sso_subject`, never a name) plus plain indexed integers, so it outlives anything it points at.
+`campus_id` is denormalized onto the row for the same reason: audit reads stay campus-isolated after
+the task is gone.
+
+Two consequences worth knowing. `method="manual"` does **not** by itself mean "an admin did this" —
+a student's own passport check-in also writes `manual`; the admin override is identified by
+`verified_by` being set plus the presence of an audit row. And SQLite ships `PRAGMA foreign_keys=OFF`
+and the app never enables it, so the `ondelete="CASCADE"` declarations elsewhere are currently inert
+and would only start firing on Postgres — the FK-free ledger is correct under both.
+
+**As built (US-18 / FR-E4).** The sketch above says `QuizItem` / `QuizResponse`; the shipped models
+are `AssessmentItem` (US-12) and `AssessmentResponse`, both in `models/challenge.py`. The name follows
+the code. Five decisions are not readable off it:
+
+**The outcome tag is joined, not copied onto the response.** `AssessmentResponse` reaches its tag
+through `assessment_item_id`. Denormalizing it — as `CheckInAudit` does `campus_id` — looks
+symmetrical and is wrong here: that ledger carries no FKs and must outlive its referents, whereas a
+response cascade-deletes with its item and can never outlive it. The decisive case is US-12's
+`AssessmentItemUpdate`, which lets an admin edit `outcome_tag`. A copied tag would leave old scores
+filed under the old tag, so the learning-outcome report below would count one item under two tags with
+no principled answer for which is right. Joining means retagging an item retags its whole score
+history — which is what retagging an item means.
+
+**An MCQ is one attempt** (`uq_response_student_item`, 409 on a second), and this is load-bearing
+rather than tidy. It is paired with the decision below and neither survives alone: the instant
+feedback names the correct option, so retries would make every stored score a 1.0 and flatten the
+learning-outcome aggregate into noise. If retries are ever wanted, the constraint is what has to go,
+and the report must then average *first* attempts only.
+
+**The feedback names the correct option**, because a verdict alone teaches nothing and FR-E4 exists to
+teach. It is composed server-side (the client never holds the key) and templated, not generated —
+AI-authored feedback against a rubric is US-19 / FR-E5. `ai_feedback` is deliberately absent from the
+model: it is nullable, so US-19 adds it additively at no cost, whereas a column nothing can write is
+just debt. `scored_by` went in now for the opposite reason — it is `NOT NULL`, there is no Alembic,
+and adding it later would mean dropping every existing database.
+
+**The student never receives `answer_key`.** `AssessmentItemOut` carries it and `TaskOut` embeds it;
+that is safe only because every route serving them is admin-gated. The student surface has its own
+`KnowledgeCheckItemOut` with no such field *at all*, so it cannot leak one even when built from an ORM
+item — a leaked key makes auto-scoring theatre, since the client could score itself. The regression
+test asserts on shape, not on the absence of the answer text: the correct option is necessarily in the
+body, being one of the four the student picks between. What must not be there is anything marking it.
+
+**The quiz lives in the week sheet, not on a route.** The design mockup's S6 screen hangs off a "Learn"
+tab in a bottom nav this app does not have, so a standalone screen would need an entry point invented
+for it. Worth knowing before US-19 adds the reflection surface and meets the same wall — the mockup
+also assumes a fuller Material 3 token set (`--wp-secondary-container` and friends) that
+`theme/tokens.css` does not define, and an undefined custom property is not a fallback, it is nothing.
+
+**As built (US-19 / FR-E5).** `ai_feedback` landed exactly as predicted two paragraphs up — nullable,
+additive, no schema fight. The prediction was half right: `create_all` does not add a column to an
+existing table, so the "no cost" is a fresh `make clean` for every dev, and it fails *silently* if
+skipped (the column simply is not there and every reflection submit 500s on insert). Nullable buys the
+absence of an Alembic migration, not the absence of a rebuild. Six things are not readable off the code:
+
+**Nothing here is AI, and the schema does not claim otherwise.** §6.3 says Claude scores the reflection.
+Claude does not, yet. `services/reflection_scoring.py` defines a `ReflectionScorer` Protocol and
+`score_reflection` takes one as a *parameter*, so the route does `Depends(get_reflection_scorer)` and a
+model drops in behind the seam without touching the service, the routes, the schemas, the storage, or
+the UI. What is behind it today is `StubReflectionScorer`: rubric-vocabulary overlap plus length. It
+cannot tell a thoughtful paragraph from one that quotes the rubric back — the latter scores *higher*,
+and a test pins that so the weakness is recorded rather than discovered. Hence `scored_by` is `"auto"`
+and never `"ai"`, and the student-facing callout says "Guide feedback" (the app's persona, per mockup
+S6) rather than "AI feedback": a stub behind an AI label is the app lying to a student about where a
+grade came from. The seam is also why the scorer is injected via `dependency_overrides` rather than
+monkeypatched — it is the mechanism `conftest` already uses for `get_db`, and the suite still contains
+no `monkeypatch`.
+
+**Why overlap and not just length:** FR-E5 says *scored against the rubric*. A word count never touches
+the rubric, so the acceptance test would assert something the code does not do. Overlap is a shallow
+signal but a genuine function of the rubric, and monotone — which is what makes it defensible rather
+than arbitrary. The BDD step asserts `0.0 < score < 1.0`, because a bare 0.0 or 1.0 is indistinguishable
+from a constant.
+
+**A scorer that cannot answer refuses, and stores nothing** (503, the only one in the app). This is not
+a promise in a comment: `db.add` sits *after* the scorer call, so every failure above it returns before
+the session is touched. It matters because a reflection is one attempt — a student who cannot tell
+whether a failed submit burned it has to assume it did, which is why the copy says "Nothing was
+recorded" and why the test that earns its place is *"still answerable after a 503"* rather than the row
+count. The client mirrors it: the textarea locks on success only, never in a `finally`.
+
+**Out-of-range scorer output is refused, not clamped.** A scorer returning 1.4 is broken; clamping to
+1.0 invents a grade and skews the FR-F4 per-outcome mean with a number that looks exactly like a real
+one. The check lives in the service rather than a schema because the scorer's output never passes
+through one.
+
+**The override keeps `ai_feedback`, and there is no audit table.** FR-D6 mandates a ledger and a
+mandatory reason for a check-in override; FR-E5 asks only that `scored_by` become `"human"`, and that
+field on the row *is* the record — `CheckInAudit` is check-in-shaped and not reusable, and a table
+nothing requires is the same debt as a column nothing can write. Given no ledger, the retained
+`ai_feedback` beside `scored_by="human"` is the *only* trace an override leaves: `scored_by` answers
+"is this the machine's score?", the feedback answers "what did the machine say?", and clearing it would
+destroy the only evidence of the thing being overridden. The cost is real and visible — a hand-set 90%
+can sit beside "This is quite brief" — but that is a labelling problem, and the fix if it ever needs
+one is an additive nullable admin note, not deleting evidence. For the same reason there is no
+`human_feedback` column yet: nothing can write it.
+
+**The admin routes hang off `/api/challenges/{cid}/tasks/{tid}/items/{iid}/responses`,** not
+`/api/assessments`, so the existing `_get_challenge_or_404` → `_get_task_or_404` → `_get_item_or_404`
+chain supplies campus isolation and 404 semantics for free. The student-side `_item_in_active_challenge`
+cannot serve an admin: it resolves the campus's *active* challenge, so publishing next semester's would
+strand last semester's scores behind a 404 — an admin must still be able to read and fix them. The
+service functions live in `services/assessments.py` (which owns `AssessmentResponse`) rather than
+`services/challenges.py` (which owns authoring), following the one-service-per-concern split
+`services/checkins.py` documents.
+
+**A live bug the reflection surface would have shipped.** `_stored_view` computed `correct = score ==
+1.0`. The moment `list_week_items` stopped filtering reflections out, a reflection scoring 0.6 came back
+`correct: false` and would have rendered "Incorrect" — a verdict a rubric score cannot support. `correct`
+is now `bool | None`, null for reflections, and `feedback` is its mirror image: null for every MCQ, whose
+feedback is composed from the answer key at scoring time and never stored. Each item type reports what it
+can actually prove, and a reflection re-visit can restate its feedback where an MCQ re-visit cannot.
+
+**The mockup wall predicted above, met.** S6 draws one Submit under both cards; this ships one per card.
+A shared button that half-succeeds — MCQ 201, reflection 503 — has no honest state to render, and each
+item is separately one-attempt anyway. The `--wp-secondary-container` prediction also held: the Guide
+callout uses `--wp-secondary`/`--wp-on-secondary` for the reason given above. The score renders as a
+percentage, not the mockup's "4/5" — that value is a static mock, and the API's score is a fraction.
+
+**As built (US-23 / FR-F3).** `ContentView` ships as the sketch above reserved it — `(student_id,
+task_id, content_ref, ts)` in `models/engagement.py` — plus a `GuideSession(student_id, challenge_id,
+started_at)` the sketch never named, because §10 promises "ContentViews + chat sessions per student"
+and a chat session had nowhere to live. Four things are not readable off the schema:
+
+**This is the app's first write-side instrumentation, and that is a category difference.** Every other
+report counts rows some feature wrote for its own reasons — a `CheckIn` exists whether or not anyone
+reports on it. A `ContentView` exists *only* because the report wants it, which is why US-23 owns the
+write paths and not just a query. The consequence to keep in mind: a bug in the instrumentation is
+invisible in the product and only ever shows up as a number that is quietly wrong.
+
+**The two content refs are recorded by different halves of the app, deliberately.** `tip` is written
+server-side by the scan route, because that route composes and returns the tip and so is the only
+thing that honestly knows one was delivered; a client-reported count would measure the client. Only
+`week_detail` is posted (`POST /api/content-views`), because opening a sheet is state that exists
+nowhere else. UC-6's trigger — "a successful check-in, **or opening a week**" — is what authorizes
+counting it. Note the honest limit: the tip fires only on the scan path, so `tip` counts scans, not
+check-ins.
+
+**`ContentView` has no unique constraint, unlike `uq_checkin_student_task`.** A week can be completed
+once but read any number of times, and re-reading is engagement rather than a duplicate to reject. So
+the grain matches the attendance report's `count(*)`: views, not viewers. It also scopes through
+`task_id` rather than carrying `challenge_id`, exactly as `CheckIn` does, so the join through `Task`
+is what enforces campus isolation. `GuideSession` carries `challenge_id` directly because a chat is
+not about a week and has no task to inherit scope from.
+
+**`guide_sessions` is a structural 0 until US-16.** Nothing mints a `GuideSession` — there is no
+conversational guide yet, and no LLM client anywhere in the backend. The table, the query, the report
+field and the card row all exist and are exercised by direct-inserted rows, so US-16 only has to write
+one. The zero is reported rather than omitted for the reason `AttendanceReportOut` reports `staff: 0`:
+it says the path FR-F3 anticipates is not yet wired, which an admin should be able to read rather than
+infer. The card says so in words, because "0" beside "Guide chat sessions" reads as "nobody used it"
+when the truth is that nobody can.
+
+**The reports gained a challenge selector (US-23).** Only US-23's Gherkin says "both can be viewed per
+challenge", but `challenge_id` is an optional query param on *every* route under `/api/reports`
+(participation, attendance, engagement, the outcomes aggregate US-24 later added, and the prize CSV),
+and one control on the dashboard drives them. The resolver is shared for the same reason it always was — two cards on one dashboard must never
+disagree about which challenge they describe — and the export follows it because a drawing run against
+the wrong semester has real prizes attached. Omitting the param keeps the old behaviour exactly (the
+campus's active challenge), and an explicit id is held to the same published-only rule: the parameter
+selects, it does not unlock a draft. A cross-campus id is a 404, not a 403, so a report cannot be used
+to probe which ids exist elsewhere. Side effect worth having: a past semester is reportable at all,
+which it was not before.
+
+**As built (US-24 / FR-F4).** No schema at all: `learning_outcome_report` in
+`services/reports.py` is a query over the `AssessmentItem` / `AssessmentResponse` the US-18 block above
+already describes, and US-24 added no column, no table and no write path. That is the point — `score`
+is a `Float` and `scored_by` is `NOT NULL` today precisely because this report was foreseen, so the
+story is the read side of decisions already argued. Four things are not readable off the schema:
+
+**The bucket vocabulary is open, and that breaks the pattern the other reports share.**
+`AttendanceReportOut` and `EngagementReportOut` reuse a `Literal` from the write path and seed their
+buckets from a module-level `*_ORDER` tuple, which buys two things at once: a fourth capture method
+cannot be added without this report failing to validate, and the bucket order is fixed. Neither is
+available here. `outcome_tag` is admin-authored free text on `AssessmentItem` (US-12), so there is no
+constant to seed from and nothing to check against — `OutcomeScoreOut.outcome_tag` is a plain `str` and
+there is no `OUTCOME_ORDER`. The order comes from the query instead (`ORDER BY outcome_tag`), and it is
+alphabetical rather than ranked by score because rows must hold still: ranking would move a row every
+time its mean crossed a rounding boundary, reshuffling a card under an admin who just hit Refresh.
+
+**The query is driven from the items and outer-joins the responses, which is the same guarantee the
+`*_ORDER` tuples give, obtained differently.** A tag whose items nobody has answered must still appear
+(`response_count: 0`, `mean_score: null`) — "nobody has answered anything tagged sleep-hygiene" is a
+finding, and an inner join would make it indistinguishable from a tag that does not exist. The tag set
+is still knowable without a constant, because the challenge's own items enumerate it. This is
+`participation_report`'s LEFT OUTER JOIN argument — a week nobody finished is still a rung — in another
+vocabulary. Scope comes from the join through `Task` to `challenge_id`, as the two reports above, just
+one hop longer: `AssessmentResponse → AssessmentItem → Task`.
+
+**`mean_score` is `None`, never `0.0`, when nothing has been answered, and the total mean is weighted
+by response.** The two are the same instinct: report the number that is true rather than the one that
+is convenient. `0.0` for "not asked yet" would paint a 0% bar an admin reads as a catastrophe, so the
+card names those tags in prose instead of drawing them a row — a 0% bar and a no-data bar look
+identical, and an outcome the cohort genuinely bombed is the one finding here worth acting on. The
+total mean is `avg()` over every row, not the average of the per-tag means, which would let a tag with
+three responses outvote one with three hundred. Both totals are counted across every response rather
+than folded up from the buckets, exactly as `total_checkins` is.
+
+**`human_scored_count` is not a structural zero, and US-24 was built believing it would be.** Worth
+recording because the branch outlived its own assumption. US-19 was unmerged while this was written,
+so `scored_by="human"` had no writer, and the plan was the `guide_sessions` move: report the zero,
+exercise it with direct-inserted rows, let the story that writes one arrive later. US-19 landed first.
+The count now moves the moment an admin uses `PATCH .../responses/{id}`, and two things changed with
+it. The Gherkin binder drives the real routes — AI-scored through `POST /items/{id}/reflections`, then
+overridden through the admin PATCH — because the house rule is that direct inserts are reserved for
+rows no route can write, and the exception ends when a route exists. The scenario got stronger for it:
+the reflections are scored twice, so the aggregate has to reflect the human value rather than the one
+the essay originally earned, which no hand-written row could have shown. And the card names the
+hand-scored count once it is non-zero, having planned to stay silent forever. `scored_by` is counted
+but never filtered — an overridden score is a score, which is the whole of the second scenario.
+
+The general lesson, for the next story that reserves a field for one that has not landed: a structural
+zero is a claim with an expiry date, and the code that asserts it should be read again the day the
+other story merges. Ours asserted it in five docstrings and a test name.
+
+**Theme is data, not code (R6 / NFR-6).** `Theme.id` is a slug that doubles as the SPA's
+`data-theme` value, so a theme's static token block still skins the app if its row is missing.
+`palette_json` maps a CSS custom-property suffix to its value (`{"primary": "#ff4438"}`), which the
+SPA applies as `--wp-*` over that block. The asset fields are `*_url` rather than the object-store
+`*_key` originally sketched — there is no asset store yet, so admins supply URLs; swapping to keys
+is a later change behind the same API. Copy is split into `app_title` / `tagline` (the strings the
+app renders) and `copy_tone` (the descriptor authors write to). The student's passport response
+embeds the *resolved* theme, so a re-skin ships no code.
+
+**Duplication is a deep copy, not a template link (FR-B6).** `POST /api/challenges/{id}/duplicate`
+re-inserts the `Challenge`, its `Task` rows (positions preserved, so the gapless 1..N invariant holds
+for free) and their `QuizItem`s as new rows. The copy is always `draft` and carries no `Enrollment`s
+or `CheckIn`s — those belong to the original's run, not to the template. Task QR tokens need no
+handling at all: they are derived from task id, so copies mint their own. Dates are copied verbatim;
+there is no academic calendar to shift Fall→Spring against, and a draft is invisible to students
+until published, so stale dates are inert until the admin retimes them.
+
+The one wrinkle is `uq_challenge_campus_name_sem`: a copy cannot reuse name+semester. The request
+body's `name`/`semester` are both optional, and an omitted name makes the server derive the first
+free `"<base> (Copy)"` / `"(Copy N)"`, stripping any existing suffix so copies of copies don't stack.
+That derivation is what the admin UI relies on — it posts a name only when the admin actually types
+one, because echoing our own suggestion back would collide on the second duplicate into a semester
+rather than yielding `(Copy 2)`. An explicit, admin-chosen collision still returns 409.
 
 ---
 
@@ -172,10 +483,13 @@ resources. **Guardrails (non-negotiable):**
 - No PHI collected in chat; conversation minimally logged for improvement.
 
 ### 6.3 Automated assessment (replaces hand-scored paper)
-- **MCQ knowledge checks:** auto-scored instantly.
-- **Reflections:** Claude scores free-text against a per-item rubric mapped to a
-  `learning_outcome_tag`, producing a score + short feedback. Aggregates into the learning-outcomes
-  report Lauren scores by hand today. Human can override (`scored_by = human`).
+- **MCQ knowledge checks:** auto-scored instantly. *Built — US-18 / FR-E4.*
+- **Reflections:** free-text scored against a per-item rubric mapped to a `learning_outcome_tag`,
+  producing a score + short feedback. Aggregates into the learning-outcomes report Lauren scores by
+  hand today. Human can override (`scored_by = human`). *Built — US-19 / FR-E5, except the scorer:
+  Claude is not wired in. The whole path — submit, score, store, show, override — runs against a
+  deterministic stub behind the `ReflectionScorer` seam, so the model is a drop-in and nothing else
+  moves. See §5's "As built (US-19)" before quoting this line at a demo.*
 
 ### 6.4 AI-assisted admin builder (the sleeper feature)
 Erika authors challenges as a Word doc today (we have the Stranger Things one). Let the admin **paste

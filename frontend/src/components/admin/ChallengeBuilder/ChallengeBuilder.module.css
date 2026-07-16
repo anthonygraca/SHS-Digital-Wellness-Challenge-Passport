@@ -100,21 +100,46 @@
   font-size: 18px;
 }
 
-.challengeCard {
+/* The wrap owns the card surface so the actions row below reads as part of the
+   same card; the inner .challengeCard is just the open affordance. */
+.challengeCardWrap {
   background: var(--wp-surface-container);
   border-radius: 16px;
-  padding: 16px 18px;
   margin-bottom: 10px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+.challengeCardWrap:hover { border-color: var(--wp-outline); }
+
+.challengeCard {
+  padding: 16px 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   cursor: pointer;
-  border: 1px solid transparent;
-  transition: border-color 0.15s;
+  border-radius: 16px 16px 0 0;
 }
-.challengeCard:hover { border-color: var(--wp-outline); }
-.challengeCard:focus-visible { outline: 3px solid var(--wp-primary); border-radius: 16px; }
+.challengeCard:focus-visible {
+  outline: 3px solid var(--wp-primary);
+  outline-offset: -3px;
+  border-radius: 16px 16px 0 0;
+}
+
+/* Full-width row on a phone rather than crowding the badge row. */
+.challengeCardActions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 18px 12px;
+  border-top: 1px solid var(--wp-outline-variant);
+}
+
+/* .btnSecondary is 40px tall; challenge cards are a primary touch surface, so
+   these meet the 44px minimum without resizing every button in the builder. */
+.cardAction {
+  min-height: 44px;
+  min-width: 44px;
+}
 
 .challengeCardInfo h3 {
   margin: 0 0 4px;
@@ -139,6 +164,13 @@
 .statusDraft {
   background: color-mix(in srgb, var(--wp-outline) 20%, transparent);
   color: var(--wp-on-surface-variant);
+}
+
+/* Which re-skin the challenge is using (US-13). */
+.themeBadge {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+  flex-shrink: 0;
 }
 .statusPublished {
   background: color-mix(in srgb, var(--wp-primary) 18%, transparent);
@@ -213,6 +245,10 @@
   gap: 10px;
   border: 2px solid transparent;
   transition: border-color 0.12s, opacity 0.12s;
+  /* Let the action row drop below the title rather than crushing it: with four
+     buttons at 360px, .taskActions (flex-shrink:0) would otherwise squeeze the
+     title down to one word per line. Pairs with .taskBody's flex-basis. */
+  flex-wrap: wrap;
 }
 
 .taskItem[data-dragging="true"] {
@@ -243,7 +279,9 @@
 }
 
 .taskBody {
-  flex: 1;
+  /* min-width:0 keeps long words ellipsis-able; the basis is what makes the
+     action row wrap to its own line once the title would get too narrow. */
+  flex: 1 1 min(200px, 100%);
   min-width: 0;
 }
 
@@ -265,26 +303,10 @@
   display: flex;
   gap: 2px;
   flex-shrink: 0;
-}
-
-/* Event check-in QR (US-8) — printed/displayed under each task for students to scan. */
-.taskQr {
-  margin-top: 10px;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px;
-  width: fit-content;
-  background: #fff; /* QR must stay dark-on-light to remain scannable in any theme */
-  border: 1px solid var(--wp-outline-variant);
-  border-radius: 8px;
-}
-
-.taskQrCaption {
-  font-size: 11px;
-  font-weight: 600;
-  color: #333;
+  /* Four buttons (Items / Check-ins / Edit / Delete) crush the row at 360px
+     without this; .taskBody has min-width:0 so it absorbs the reflow. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .reqBadge {
@@ -340,10 +362,12 @@
 
 .fieldGroup input[type="text"],
 .fieldGroup input[type="date"],
+.fieldGroup input[type="url"],
 .fieldGroup textarea,
 .fieldGroup select {
   width: 100%;
   box-sizing: border-box;
+  min-height: 44px;
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--wp-outline-variant);
@@ -351,6 +375,13 @@
   color: var(--wp-on-surface);
   font-size: 14px;
   font-family: inherit;
+}
+
+.fieldHint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--wp-on-surface-variant);
 }
 
 .fieldGroup input:focus,
@@ -370,6 +401,32 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+
+/* Theme palette pickers (US-13). Two-up on a phone, wider as room allows. */
+.colorGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.colorField label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: var(--wp-on-surface-variant);
+}
+
+.colorField input[type="color"] {
+  width: 100%;
+  height: 44px;
+  padding: 2px;
+  border-radius: 10px;
+  border: 1px solid var(--wp-outline-variant);
+  background: var(--wp-surface-container);
+  cursor: pointer;
 }
 
 .checkRow {
@@ -461,6 +518,64 @@
   margin-top: 2px;
 }
 
+/* ── Score override (FR-E5) ───────────────────────────────────── */
+
+/* Stacked, so two buttons on a narrow row never squeeze each other's label. */
+.itemActions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.responseText {
+  margin: 6px 0 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--wp-on-surface);
+  white-space: pre-wrap;
+  /* A reflection runs to 4000 characters and may hold a pasted string with no spaces,
+     which would otherwise widen the row past the modal. */
+  overflow-wrap: anywhere;
+}
+
+.scoreEditor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.scoreLabel {
+  font-size: 11px;
+  color: var(--wp-on-surface-variant);
+}
+
+.scoreInput {
+  width: 76px;
+  padding: 6px 8px;
+  border: 1px solid var(--wp-outline-variant);
+  border-radius: 8px;
+  background: var(--wp-surface);
+  color: var(--wp-on-surface);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scoreValue {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--wp-on-surface);
+}
+
+/* A hand-set score is worth spotting in a list of machine ones — it is the row an
+   admin is looking for when they come back. */
+.methodBadge[data-scored-by="human"] {
+  background: color-mix(in srgb, var(--wp-primary) 16%, transparent);
+  color: var(--wp-primary);
+}
+
 /* ── Assessment item form ─────────────────────────────────────── */
 .itemForm {
   border-top: 1px solid var(--wp-outline-variant);
@@ -482,4 +597,159 @@
 
 .optionRow input {
   flex: 1;
+}
+
+/* ── Manual completion override + audit (FR-D6 / US-27) ───────── */
+
+/* This panel is used at a live event, on a phone, one-handed. The shared
+   .btnPrimary/.btnSecondary floor is 40px, under the 44px CLAUDE.md requires;
+   scoped here rather than raised globally so the other modals keep their
+   current metrics. Verified at 360px — every button in the dialog clears 44. */
+.overridePanel button {
+  min-height: 44px;
+}
+
+.tabRow {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 12px;
+  flex-wrap: wrap;
+}
+
+.tabBtn {
+  flex: 1;
+  min-width: 120px;
+  /* 44px floor per CLAUDE.md — these are primary targets on a phone. */
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--wp-outline-variant);
+  border-radius: 22px;
+  background: transparent;
+  color: var(--wp-on-surface-variant);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.tabBtn:focus-visible,
+.tabBtnActive:focus-visible {
+  outline: 3px solid var(--wp-primary);
+  outline-offset: 2px;
+}
+
+.tabBtnActive {
+  composes: tabBtn;
+  border-color: var(--wp-primary);
+  background: color-mix(in srgb, var(--wp-primary) 14%, transparent);
+  color: var(--wp-primary);
+  font-weight: 600;
+}
+
+.checkinList,
+.auditList {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Stacked, not side-by-side: at 360px a row of 44px targets would collide. */
+.checkinRow,
+.auditRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--wp-outline-variant);
+  border-radius: 10px;
+  background: var(--wp-surface-container);
+}
+
+.checkinSubject {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--wp-on-surface);
+  /* Long subjects must ellipsis, never widen the modal. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkinMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+}
+
+.checkinActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.checkinActions button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+}
+
+.methodBadge,
+.actionBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--wp-on-surface) 10%, transparent);
+  color: var(--wp-on-surface-variant);
+}
+
+.actionCreate {
+  background: color-mix(in srgb, var(--wp-primary) 16%, transparent);
+  color: var(--wp-primary);
+}
+
+.actionUpdate {
+  background: color-mix(in srgb, var(--wp-on-surface) 12%, transparent);
+  color: var(--wp-on-surface);
+}
+
+.actionDelete {
+  background: color-mix(in srgb, var(--wp-error) 14%, transparent);
+  color: var(--wp-error);
+}
+
+.auditReason {
+  margin: 0;
+  font-size: 13px;
+  color: var(--wp-on-surface);
+  overflow-wrap: anywhere;
+}
+
+.auditRow summary {
+  font-size: 12px;
+  color: var(--wp-on-surface-variant);
+  cursor: pointer;
+  min-height: 24px;
+}
+
+.auditSnapshot {
+  margin: 6px 0 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wp-on-surface) 6%, transparent);
+  color: var(--wp-on-surface-variant);
+  font-size: 11px;
+  line-height: 1.4;
+  /* Snapshots are wide — scroll them, never the page body. */
+  overflow-x: auto;
 }

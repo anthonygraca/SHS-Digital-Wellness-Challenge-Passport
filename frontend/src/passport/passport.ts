@@ -14,6 +14,34 @@ export async function fetchPassport(): Promise<Passport | null> {
 }
 
 /**
+ * Record that the student looked at a week's content (FR-F3 / US-23).
+ *
+ * Fire-and-forget by design, and the only call in this module that resolves to
+ * nothing: engagement telemetry must never be able to break a student's passport.
+ * A view that fails to record costs the admin's report one count; a view that
+ * throws would cost the student their week detail. Errors are swallowed here so no
+ * caller has to remember to.
+ *
+ * The tip's view is not sent from here — the scan route records that one itself,
+ * because it is what delivers the tip (backend/app/routers/passport.py).
+ */
+export async function recordContentView(
+  weekNo: number,
+  contentRef: "week_detail" | "tip",
+): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/api/content-views`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ weekNo, contentRef }),
+    });
+  } catch {
+    // Offline, or the request never left. The passport is unaffected either way.
+  }
+}
+
+/**
  * Record an event-QR check-in from a scanned token (US-8 core loop). Returns the
  * refreshed passport, the completed week, and a tip on success. Throws {@link ApiError}
  * carrying the server's message on failure so the UI can show the exact copy —

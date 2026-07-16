@@ -4,12 +4,26 @@ from sqlalchemy import select
 
 from app.models.challenge import Challenge, CheckIn, Task
 from app.models.student import Student
-from app.services.seed import seed_demo_challenge
+from app.models.theme import Theme
+from app.services.qr import mint_event_token
+from app.services.seed import seed_demo_challenge, seed_themes
 
 
 def _seed_challenge(db_sessionmaker):
     with db_sessionmaker() as db:
         seed_demo_challenge(db)
+
+
+def _seed_themes(db_sessionmaker):
+    with db_sessionmaker() as db:
+        seed_themes(db)
+
+
+def _set_challenge_theme(db_sessionmaker, theme_id):
+    with db_sessionmaker() as db:
+        challenge = db.execute(select(Challenge)).scalars().one()
+        challenge.theme_id = theme_id
+        db.commit()
 
 
 def _sign_in(client, subject="abc@csub.edu", affiliation="student"):
@@ -111,6 +125,7 @@ def test_passport_week_payload_is_camelcase(client, db_sessionmaker):
     assert set(body.keys()) == {
         "challengeName",
         "theme",
+        "themeConfig",
         "totalWeeks",
         "completedWeeks",
         "remainingWeeks",
@@ -195,3 +210,103 @@ def test_passport_completions_are_per_student(client, db_sessionmaker):
     body = client.get("/api/passport").json()
     assert body["completedWeeks"] == 0
     assert _statuses(body)[0] == "available"
+
+
+# --- US-13 (FR-B4 / NFR-6): the passport carries the resolved theme -------------
+
+
+def test_passport_carries_resolved_theme_config(client, db_sessionmaker):
+    """Scenario 1: the student app gets the selected theme's palette, art and copy."""
+    _seed_themes(db_sessionmaker)
+    _seed_challenge(db_sessionmaker)  # demo challenge uses "stranger-things"
+    _sign_in(client)
+
+    body = client.get("/api/passport").json()
+    assert body["theme"] == "stranger-things"
+    cfg = body["themeConfig"]
+    assert cfg["id"] == "stranger-things"
+    assert cfg["palette"]["primary"] == "#ff4438"
+    assert cfg["palette"]["hero-a"] == "#4a0f0a"
+    assert cfg["appTitle"] == "Wellness Passport"
+    assert cfg["tagline"] == (
+        "Step through the first portal — survival starts with protection."
+    )
+    assert cfg["copyTone"] == "dark, retro-80s, ominous"
+
+
+def test_switching_theme_re_skins_from_config_alone(client, db_sessionmaker):
+    """Scenario 2: swapping a published challenge's theme changes what the app renders."""
+    _seed_themes(db_sessionmaker)
+    _seed_challenge(db_sessionmaker)
+    _sign_in(client)
+
+    before = client.get("/api/passport").json()["themeConfig"]
+    assert before["palette"]["primary"] == "#ff4438"
+
+    _set_challenge_theme(db_sessionmaker, "harry-potter")
+
+    after = client.get("/api/passport").json()["themeConfig"]
+    assert after["id"] == "harry-potter"
+    assert after["palette"]["primary"] == "#7d2e2e"
+    assert after["palette"]["font-display"] == '"Cinzel", Georgia, serif'
+    assert after["tagline"] == "Solemnly swear to look after your wellbeing."
+
+
+def test_edited_theme_is_reflected_in_passport(client, db_sessionmaker):
+    """Scenario 3: an admin's palette/copy edit shows up on the student's next fetch."""
+    _seed_themes(db_sessionmaker)
+    _seed_challenge(db_sessionmaker)
+    _sign_in(client)
+
+    assert client.get("/api/passport").json()["themeConfig"]["palette"]["primary"] == (
+        "#ff4438"
+    )
+
+    with db_sessionmaker() as db:
+        theme = db.get(Theme, "stranger-things")
+        theme.palette = {**theme.palette, "primary": "#00e5ff"}
+        theme.tagline = "The gate is open."
+        db.commit()
+
+    cfg = client.get("/api/passport").json()["themeConfig"]
+    assert cfg["palette"]["primary"] == "#00e5ff"
+    assert cfg["tagline"] == "The gate is open."
+
+
+def test_checkin_response_carries_theme_config(client, db_sessionmaker):
+    """The refreshed passport is themed too, so a check-in never drops the skin.
+
+    The only check-in path is now the QR scan (#98, QR-only), whose response nests
+    the refreshed passport under ``passport`` — assert the skin survives there.
+    """
+    _seed_themes(db_sessionmaker)
+    _seed_challenge(db_sessionmaker)
+    _sign_in(client)
+
+    token = mint_event_token(_task_ids_by_week(db_sessionmaker)[1])
+    body = client.post("/api/checkins/scan", json={"token": token}).json()
+    assert body["passport"]["themeConfig"]["id"] == "stranger-things"
+
+
+def test_passport_theme_config_null_for_default_theme(client, db_sessionmaker):
+    _seed_themes(db_sessionmaker)
+    _seed_challenge(db_sessionmaker)
+    _set_challenge_theme(db_sessionmaker, "")
+    _sign_in(client)
+
+    body = client.get("/api/passport").json()
+    assert body["theme"] == ""
+    assert body["themeConfig"] is None
+
+
+def test_passport_survives_unknown_theme_id(client, db_sessionmaker):
+    """A dangling theme_id degrades to the default skin rather than erroring."""
+    _seed_challenge(db_sessionmaker)  # themes deliberately not seeded
+    _sign_in(client)
+
+    resp = client.get("/api/passport")
+    assert resp.status_code == 200
+    body = resp.json()
+    # The id still rides along — the app's static token blocks can honour it.
+    assert body["theme"] == "stranger-things"
+    assert body["themeConfig"] is None
