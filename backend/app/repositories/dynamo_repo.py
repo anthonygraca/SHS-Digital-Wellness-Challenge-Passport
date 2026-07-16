@@ -884,6 +884,43 @@ class DynamoRepository:
             if r["student_id"] in found
         ]
 
+    def count_task_checkins(self, task_id: int) -> int:
+        """How many students have checked in for a task (FR-D4 / US-28).
+
+        ``Select="COUNT"`` returns a number with no items, so the live dashboard's 5s
+        poll costs one query and no payload rather than shipping ~200 rows to be
+        counted client-side. Still paginates: Dynamo counts at most 1 MB per page.
+        """
+        total = 0
+        kwargs: dict[str, Any] = {
+            "IndexName": "ByTask",
+            "KeyConditionExpression": Key("task_id").eq(task_id),
+            "Select": "COUNT",
+        }
+        resp = self.checkins.query(**kwargs)
+        total += resp["Count"]
+        while "LastEvaluatedKey" in resp:
+            resp = self.checkins.query(
+                ExclusiveStartKey=resp["LastEvaluatedKey"], **kwargs
+            )
+            total += resp["Count"]
+        return total
+
+    def list_recent_task_checkins(self, task_id: int, limit: int) -> list[CheckInDTO]:
+        """The newest ``limit`` check-ins for a task, newest first.
+
+        ``ts`` is the ByTask range key, so ``ScanIndexForward=False`` + ``Limit`` makes
+        the index do the ordering and the truncation: Dynamo reads ~6 rows rather than
+        the task's whole history. No Students read — the caller is the projected screen.
+        """
+        resp = self.checkins.query(
+            IndexName="ByTask",
+            KeyConditionExpression=Key("task_id").eq(task_id),
+            ScanIndexForward=False,
+            Limit=limit,
+        )
+        return [self._checkin_dto(r) for r in resp.get("Items", [])]
+
     def list_task_audits(self, task_id: int, student_id=None) -> list[CheckInAuditDTO]:
         kwargs: dict[str, Any] = {
             "KeyConditionExpression": Key("task_id").eq(task_id),
@@ -1195,11 +1232,12 @@ class DynamoRepository:
                 found.add(_int(r["task_id"]))
         return found
 
-    def _build_passport_for(self, challenge: ChallengeDTO, student_id) -> PassportView:
+    def build_passport_for(self, challenge: ChallengeDTO, student_id) -> PassportView:
         """Assemble the passport for an already-resolved active challenge.
 
-        Split out so the QR scan path can reuse the challenge it just validated instead
-        of re-querying ``get_active_challenge`` a second time for the refreshed passport.
+        Split out so a caller that already holds the challenge reuses it instead of
+        re-querying ``get_active_challenge``: the QR scan path (which just validated it
+        against the token) and /api/bootstrap (which needs it for the enrollment answer).
         """
         tasks = self._tasks_for_challenge(challenge.id)
         completed = self._completed_task_ids(student_id, {t.id for t in tasks})
@@ -1215,7 +1253,7 @@ class DynamoRepository:
         challenge = self.get_active_challenge(campus_id)
         if challenge is None:
             return None
-        return self._build_passport_for(challenge, student_id)
+        return self.build_passport_for(challenge, student_id)
 
     def _create_checkin(
         self, student_id, task_id: int, challenge_id: int, method: str
@@ -1261,4 +1299,4 @@ class DynamoRepository:
             raise DuplicateCheckIn
         # Reuse the challenge already resolved above for the refreshed passport, so the
         # scan path resolves the active challenge once rather than twice.
-        return self._task_dto(raw), self._build_passport_for(challenge, student_id)
+        return self._task_dto(raw), self.build_passport_for(challenge, student_id)

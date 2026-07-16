@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.challenge import CheckIn, Task
+from app.models.challenge import Challenge, CheckIn, Task
 from app.models.theme import Theme
 from app.services.challenges import get_active_challenge_for_campus
 from app.services.qr import verify_event_token
@@ -101,7 +101,17 @@ def build_passport(
     challenge = get_active_challenge_for_campus(db, campus_id)
     if challenge is None:
         return None
+    return build_passport_for(db, challenge=challenge, student_id=student_id)
 
+
+def build_passport_for(
+    db: Session, *, challenge: Challenge, student_id: int
+) -> PassportView:
+    """:func:`build_passport` for an already-resolved challenge — see the repo protocol.
+
+    On SQL both lookups are cheap session queries; this exists to keep the seam
+    uniform with the Dynamo path, where the saved round trip is real.
+    """
     tasks = list(
         db.execute(
             select(Task).where(Task.challenge_id == challenge.id).order_by(Task.position)

@@ -109,6 +109,14 @@ class Repository(Protocol):
     # Dynamo uses TransactWriteItems across the two tables.
     def get_checkin(self, task_id: int, checkin_id: int) -> CheckInDTO | None: ...
     def list_task_checkins(self, task_id: int) -> list[tuple[CheckInDTO, StudentDTO]]: ...
+
+    # The two reads behind the live event dashboard's count + recent feed (FR-D4 /
+    # US-28). Split out from list_task_checkins on purpose: that one joins Students to
+    # carry the subject, which the projected screen must never receive. These return a
+    # number and ~6 identity-free rows, so the privacy property is structural rather
+    # than a matter of the client remembering not to render a field it was handed.
+    def count_task_checkins(self, task_id: int) -> int: ...
+    def list_recent_task_checkins(self, task_id: int, limit: int) -> list[CheckInDTO]: ...
     def list_task_audits(
         self, task_id: int, student_id: StudentId | None = None
     ) -> list[CheckInAuditDTO]: ...
@@ -206,6 +214,17 @@ class Repository(Protocol):
     def build_passport(
         self, campus_id: str, student_id: StudentId
     ) -> PassportView | None: ...
+    def build_passport_for(
+        self, challenge: ChallengeDTO, student_id: StudentId
+    ) -> PassportView:
+        """Assemble the passport for an already-resolved active challenge.
+
+        ``challenge`` must have come from this same repository (``get_active_challenge``
+        / ``get_challenge``). Exists so a caller that has already resolved the active
+        challenge — /api/bootstrap, which needs it for the enrollment answer anyway —
+        does not pay for a second lookup to also get the passport."""
+        ...
+
     def record_event_qr_checkin(
         self, campus_id: str, student_id: StudentId, token: str
     ) -> tuple[TaskDTO, PassportView]:

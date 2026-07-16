@@ -456,9 +456,9 @@ export function Passport({
   fetchData = fetchPassport,
   scanCheckInFn = scanCheckIn,
 }: PassportProps) {
-  const { session, loading, signOut } = useSession();
-  const [passport, setPassport] = useState<PassportData | null>(null);
-  const [dataLoading, setDataLoading] = useState(true);
+  const { session, passport: seeded, loading, signOut } = useSession();
+  const [passport, setPassport] = useState<PassportData | null>(seeded ?? null);
+  const [dataLoading, setDataLoading] = useState(seeded == null);
   // Whether what we are showing came from the cache rather than this load's fetch.
   const [stale, setStale] = useState(false);
   const online = useOnlineStatus();
@@ -466,6 +466,17 @@ export function Passport({
 
   useEffect(() => {
     if (!session || !session.isCurrentStudent) return;
+    // Paint the bootstrap seed the instant it arrives — that is the round trip this
+    // screen no longer waits on. The fetch below still runs to revalidate, because a
+    // seed is only ever as fresh as the app-load bootstrap that carried it: a remount,
+    // or an admin's manual override landing mid-session, can leave it stale. The
+    // revalidation is a single non-blocking request after paint, not the old
+    // render-nothing-then-fetch waterfall.
+    if (seeded) {
+      setPassport(seeded);
+      setStale(false);
+      setDataLoading(false);
+    }
     let active = true;
     void (async () => {
       try {
@@ -484,9 +495,12 @@ export function Passport({
         // on "Loading your passport…" permanently. A rejected fetch — not
         // navigator.onLine — is what proves the data on screen is not live.
         if (!active) return;
-        const cached = readPassportSnapshot();
-        setPassport(cached);
-        setStale(cached != null);
+        // A failed *revalidation* must not blank a passport already painted from the
+        // seed — that data is as good as the cache it would fall back to. Keep what
+        // is shown; only reach for the snapshot when starting from nothing. Either
+        // way the fetch failed, so mark it stale: the offline banner is honest now.
+        setPassport((prev) => prev ?? readPassportSnapshot());
+        setStale(true);
       } finally {
         // active-guarded: finally still runs when the effect was torn down
         // mid-flight, and setting state after unmount is a no-op worth avoiding.
@@ -496,7 +510,7 @@ export function Passport({
     return () => {
       active = false;
     };
-  }, [session, fetchData]);
+  }, [session, seeded, fetchData]);
 
   // The challenge's theme rides along on every passport response, so re-skinning
   // on a theme change (US-13) costs nothing but this hand-off — and a scan refresh

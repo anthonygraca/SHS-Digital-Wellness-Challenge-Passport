@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -101,6 +101,31 @@ def list_task_checkins(db: Session, task_id: int) -> list[tuple[CheckIn, Student
         .order_by(CheckIn.ts.desc())
     ).all()
     return [(checkin, student) for checkin, student in rows]
+
+
+def count_task_checkins(db: Session, task_id: int) -> int:
+    """How many students have checked in for a task (FR-D4 / US-28)."""
+    return db.execute(
+        select(func.count()).select_from(CheckIn).where(CheckIn.task_id == task_id)
+    ).scalar_one()
+
+
+def list_recent_task_checkins(db: Session, task_id: int, limit: int) -> list[CheckIn]:
+    """The newest ``limit`` check-ins for a task, newest first.
+
+    No Student join, unlike :func:`list_task_checkins`: the caller is the projected
+    live dashboard, which identifies students by check-in number only.
+    """
+    return list(
+        db.execute(
+            select(CheckIn)
+            .where(CheckIn.task_id == task_id)
+            .order_by(CheckIn.ts.desc(), CheckIn.id.desc())
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
 
 
 def list_task_audits(

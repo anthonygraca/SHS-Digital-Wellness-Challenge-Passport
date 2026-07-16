@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Challenge, CheckIn, Task } from "../../../types/challenge";
+import type {
+  Challenge,
+  CheckInSummary,
+  CheckInSummaryRow,
+  Task,
+} from "../../../types/challenge";
 import { LiveOps } from "./LiveOps";
 
 const route = vi.hoisted(() => ({
@@ -11,6 +16,7 @@ const navigate = vi.fn();
 
 const api = vi.hoisted(() => ({
   getChallenge: vi.fn(),
+  getCheckInSummary: vi.fn(),
   listCheckIns: vi.fn(),
   listCheckInAudits: vi.fn(),
 }));
@@ -23,12 +29,23 @@ vi.mock("react-router-dom", () => ({
 vi.mock("../../../api/challenges", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../api/challenges")>()),
   getChallenge: api.getChallenge,
+  getCheckInSummary: api.getCheckInSummary,
   listCheckIns: api.listCheckIns,
   listCheckInAudits: api.listCheckInAudits,
 }));
 
+/** Drive document.visibilityState, which jsdom exposes as a read-only getter. */
+function setVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => state,
+  });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
 afterEach(() => {
   route.params = { challengeId: "1", taskId: "7" };
+  setVisibility("visible");
   vi.clearAllMocks();
   vi.useRealTimers();
 });
@@ -67,21 +84,22 @@ const asChallenge = (over: Partial<Challenge> = {}): Challenge => ({
   ...over,
 });
 
-const asCheckIn = (id: number, over: Partial<CheckIn> = {}): CheckIn => ({
+const asRow = (id: number, over: Partial<CheckInSummaryRow> = {}): CheckInSummaryRow => ({
   id,
-  student_id: id,
-  student_subject: `student${id}@csub.edu`,
-  task_id: 7,
   ts: `2026-07-14T10:0${id % 10}:00Z`,
   method: "event_qr",
-  verified_by: null,
   ...over,
+});
+
+const asSummary = (count: number, recent: CheckInSummaryRow[]): CheckInSummary => ({
+  count,
+  recent,
 });
 
 describe("Live event dashboard (US-28 / FR-D4)", () => {
   it("generates the event QR when live ops opens", async () => {
     api.getChallenge.mockResolvedValue(asChallenge());
-    api.listCheckIns.mockResolvedValue([]);
+    api.getCheckInSummary.mockResolvedValue(asSummary(0, []));
 
     render(<LiveOps />);
 
@@ -94,16 +112,16 @@ describe("Live event dashboard (US-28 / FR-D4)", () => {
   it("live count increases as students scan and check in", async () => {
     vi.useFakeTimers();
     api.getChallenge.mockResolvedValue(asChallenge());
-    api.listCheckIns
-      .mockResolvedValueOnce([asCheckIn(1), asCheckIn(2)])
-      .mockResolvedValue([asCheckIn(1), asCheckIn(2), asCheckIn(3)]);
+    api.getCheckInSummary
+      .mockResolvedValueOnce(asSummary(2, [asRow(2), asRow(1)]))
+      .mockResolvedValue(asSummary(3, [asRow(3), asRow(2), asRow(1)]));
 
     render(<LiveOps />);
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
     expect(screen.getByRole("status")).toHaveTextContent("2");
 
-    // Two students scan; the next poll tick picks them up.
+    // A student scans; the next poll tick picks them up.
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
 
     expect(screen.getByRole("status")).toHaveTextContent("3");
@@ -112,18 +130,61 @@ describe("Live event dashboard (US-28 / FR-D4)", () => {
     ).toBeGreaterThanOrEqual(3);
   });
 
-  it("keeps the feed anonymous — no SSO subjects on the projected screen", async () => {
+  it("shows the count from the server, not the length of the feed it was sent", async () => {
+    // The count is every check-in; the feed is only the newest few. Rendering
+    // recent.length would silently cap the projected number at 6.
     api.getChallenge.mockResolvedValue(asChallenge());
-    api.listCheckIns.mockResolvedValue([asCheckIn(4)]);
+    api.getCheckInSummary.mockResolvedValue(
+      asSummary(147, [asRow(3), asRow(2), asRow(1)]),
+    );
+
+    render(<LiveOps />);
+
+    expect(await screen.findByText("147")).toBeInTheDocument();
+  });
+
+  it("keeps the feed anonymous — no SSO subjects on the projected screen", async () => {
+    // The endpoint has no identity to give: CheckInSummaryRow carries id/ts/method
+    // and nothing else, so this screen cannot leak a subject even by accident. The
+    // backend holds the other half of this (tests/test_checkin_summary.py).
+    api.getChallenge.mockResolvedValue(asChallenge());
+    api.getCheckInSummary.mockResolvedValue(asSummary(1, [asRow(4)]));
 
     render(<LiveOps />);
 
     expect(await screen.findByText("Student · #4")).toBeInTheDocument();
     expect(screen.queryByText(/student4@csub\.edu/)).toBeNull();
+    // The roster endpoint is for the override panel, behind a click — never the poll.
+    expect(api.listCheckIns).not.toHaveBeenCalled();
+  });
+
+  it("stops polling while the tab is hidden, and catches up on return", async () => {
+    // A projector left on overnight was making ~17,000 requests before anyone read it.
+    vi.useFakeTimers();
+    api.getChallenge.mockResolvedValue(asChallenge());
+    api.getCheckInSummary.mockResolvedValue(asSummary(1, [asRow(1)]));
+
+    render(<LiveOps />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(api.getCheckInSummary).toHaveBeenCalledTimes(1);
+
+    act(() => setVisibility("hidden"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+
+    // Twelve ticks' worth of wall clock, and not one request.
+    expect(api.getCheckInSummary).toHaveBeenCalledTimes(1);
+
+    // Coming back refreshes at once rather than waiting out a tick on a stale count.
+    await act(async () => { setVisibility("visible"); });
+    expect(api.getCheckInSummary).toHaveBeenCalledTimes(2);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(api.getCheckInSummary).toHaveBeenCalledTimes(3);
   });
 
   it("Manual override opens the FR-D6 completion override panel", async () => {
     api.getChallenge.mockResolvedValue(asChallenge());
+    api.getCheckInSummary.mockResolvedValue(asSummary(0, []));
     api.listCheckIns.mockResolvedValue([]);
     api.listCheckInAudits.mockResolvedValue([]);
 
@@ -140,7 +201,7 @@ describe("Live event dashboard (US-28 / FR-D4)", () => {
   it("a task missing from the challenge is reported, not rendered blank", async () => {
     route.params = { challengeId: "1", taskId: "999" };
     api.getChallenge.mockResolvedValue(asChallenge());
-    api.listCheckIns.mockRejectedValue(new Error("404"));
+    api.getCheckInSummary.mockRejectedValue(new Error("404"));
 
     render(<LiveOps />);
 

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_admin
@@ -24,6 +25,8 @@ from app.schemas.challenge import (
     CheckInCorrect,
     CheckInOut,
     CheckInRemove,
+    CheckInSummaryOut,
+    CheckInSummaryRow,
     ManualCheckInCreate,
     TaskCreate,
     TaskOut,
@@ -34,6 +37,11 @@ from app.services import assessments as assessment_svc
 from app.services import challenges as svc
 
 router = APIRouter(prefix="/api/challenges", tags=["challenges"])
+
+# How many recent check-ins the live dashboard's feed shows. Server-side because the
+# query's LIMIT is what keeps the read small — a client-supplied count would let a
+# caller ask for the whole list back through a route built to not return it.
+RECENT_LIMIT = 6
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +423,67 @@ def list_checkins(
         _checkin_out(checkin, student)
         for checkin, student in repo.list_task_checkins(task_id)
     ]
+
+
+@router.get(
+    "/{challenge_id}/tasks/{task_id}/checkins/summary",
+    response_model=CheckInSummaryOut,
+)
+def checkin_summary(
+    challenge_id: int,
+    task_id: int,
+    request: Request,
+    response: Response,
+    claims: dict = Depends(require_admin),
+    repo: Repository = Depends(get_repo),
+):
+    """The live event dashboard's payload: a count plus the newest few check-ins.
+
+    Exists because the dashboard polls every 5 seconds and needs neither the whole
+    list nor the identities in it (FR-D4 / US-28). ``list_checkins`` above answers a
+    different question — "who, exactly?" — for the manual-override panel, and its
+    ``student_subject`` has no business on a screen pointed at a room.
+
+    ``RECENT_LIMIT`` is enforced here rather than by the caller: the count comes from
+    an index-side COUNT and the feed from an ordered, limited query, so the server
+    reads ~6 rows where the client used to fetch ~200 and throw most of them away.
+    """
+    _get_challenge_or_404(repo, claims["campus_id"], challenge_id)
+    _get_task_or_404(repo, challenge_id, task_id)
+
+    summary = CheckInSummaryOut(
+        count=repo.count_task_checkins(task_id),
+        recent=[
+            CheckInSummaryRow(id=c.id, ts=c.ts, method=c.method)
+            for c in repo.list_recent_task_checkins(task_id, RECENT_LIMIT)
+        ],
+    )
+
+    # A weak ETag over the whole rendered payload, not over (count, newest ts): those
+    # two are unchanged when an admin *corrects* an existing check-in's method or
+    # backdates it, and the poll would then 304 its way past the very edit that
+    # prompted the refresh. Hashing what we would send is the same cost and cannot
+    # miss a change the screen would show. Weak because it claims semantic
+    # equivalence of the representation, which is all a conditional GET needs here.
+    body = summary.model_dump_json()
+    etag = f'W/"{hashlib.sha256(body.encode()).hexdigest()[:16]}"'
+
+    # What this does and does not buy, stated plainly: a quiet event returns 304 with
+    # no body, so twelve polls a minute stop re-sending the same ~1 KB. It saves the
+    # *payload*, not the work — the count and the feed have to be read to know the
+    # digest, so the Lambda still runs and still queries. Skipping the work entirely
+    # is the visibilitychange pause's job (LiveOps.tsx), not this.
+    #
+    # `no-cache` is load-bearing rather than decorative: it is what makes the browser
+    # store the response and revalidate it with If-None-Match on the next poll. With
+    # no Cache-Control at all, a response with no Last-Modified gets no heuristic
+    # freshness, the browser never conditions the request, and the ETag below is
+    # inert. `private` keeps this per-campus, cookie-gated answer out of CloudFront.
+    headers = {"ETag": etag, "Cache-Control": "private, no-cache"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    response.headers.update(headers)
+    return summary
 
 
 @router.patch(

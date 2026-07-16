@@ -1,11 +1,12 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  SHS Digital Wellness Passport — serverless backend. Four per-route Lambda
-  functions (auth / enrollment / passport / challenges) + a health probe, behind one
-  API Gateway HTTP API ($default stage), backed by one DynamoDB table per entity.
-  This HTTP API is the API-origin for the CloudFront distribution built in
-  docs/cloudfront-deploy-guide.md (everything stays same-origin).
+  SHS Digital Wellness Passport — serverless backend. Per-route Lambda functions
+  (auth / bootstrap / enrollment / passport / challenges / assessments / themes /
+  guide) + a health probe, behind one API Gateway HTTP API ($default stage), backed
+  by one DynamoDB table per entity. This HTTP API is the API-origin for the
+  CloudFront distribution built in docs/cloudfront-deploy-guide.md (everything stays
+  same-origin).
 
 Parameters:
   TablePrefix:
@@ -128,6 +129,38 @@ Resources:
           Type: HttpApi
           Properties:
             Path: /api/checkins/scan
+            Method: ANY
+
+  # The SPA's first render used to be three sequential calls into AuthFn, then
+  # EnrollmentFn, then PassportFn. This answers all three at once.
+  #
+  # It reads five tables, which is more than any other function here and dilutes the
+  # per-function least-privilege story the rest of this template is built around. The
+  # trade-off is deliberate and bounded: every policy below is DynamoDBReadPolicy —
+  # no writes, and no access to Counters or the audit ledger at all. A function that
+  # can only read the five tables whose contents it is about to hand to the signed-in
+  # owner of that data is a narrower grant than its table count suggests. If it ever
+  # needs to write something, that is the signal to split it rather than add a policy.
+  BootstrapFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.functions.bootstrap.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Challenges"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Enrollments"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Tasks"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}CheckIns"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Themes"
+      Events:
+        Bootstrap:
+          Type: HttpApi
+          Properties:
+            Path: /api/bootstrap
             Method: ANY
 
   ChallengesFn:

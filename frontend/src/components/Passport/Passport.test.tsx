@@ -13,6 +13,7 @@ import type { Session } from "../../types/session";
 
 const sessionState = vi.hoisted(() => ({
   session: null as Session | null,
+  passport: null as PassportData | null,
   loading: false,
 }));
 const signOut = vi.fn();
@@ -60,6 +61,7 @@ beforeEach(() => {
 
 afterEach(() => {
   sessionState.session = null;
+  sessionState.passport = null;
   sessionState.loading = false;
   vi.clearAllMocks();
 });
@@ -614,6 +616,64 @@ describe("PassportView offline action gating (US-6 / FR-C4)", () => {
 
     expect(screen.getByRole("button", { name: /simulate-scan/i })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: /connection required/i })).toBeNull();
+  });
+});
+
+describe("Passport container bootstrap seeding", () => {
+  it("paints instantly from the seed — no loading spinner", async () => {
+    sessionState.session = asSession({ isCurrentStudent: true });
+    sessionState.passport = passportWith(3);
+    // Revalidation resolves to the same thing; the point here is the first paint.
+    const fetchData = vi.fn().mockResolvedValue(passportWith(3));
+
+    render(<Passport fetchData={fetchData} />);
+
+    // The round trip this screen no longer blocks on: the countdown is on screen
+    // without ever having shown "Loading your passport…".
+    expect(screen.getByText(/3 of 7 complete, 4 remaining/i)).toBeInTheDocument();
+    expect(screen.queryByText(/loading your passport/i)).toBeNull();
+  });
+
+  it("revalidates the seed in the background", async () => {
+    // The seed is only as fresh as the app-load bootstrap; a background fetch keeps
+    // a long-lived session honest. Here the server has moved on by one week.
+    sessionState.session = asSession({ isCurrentStudent: true });
+    sessionState.passport = passportWith(3);
+    const fetchData = vi.fn().mockResolvedValue(passportWith(4));
+
+    render(<Passport fetchData={fetchData} />);
+
+    expect(fetchData).toHaveBeenCalled();
+    expect(
+      await screen.findByText(/4 of 7 complete, 3 remaining/i),
+    ).toBeInTheDocument();
+  });
+
+  it("fetches when the provider had no passport to hand over", async () => {
+    // The student enrolled during this session, so the bootstrap predates it.
+    sessionState.session = asSession({ isCurrentStudent: true });
+    sessionState.passport = null;
+    const fetchData = vi.fn().mockResolvedValue(passportWith(2));
+
+    render(<Passport fetchData={fetchData} />);
+
+    expect(
+      await screen.findByText(/2 of 7 complete, 5 remaining/i),
+    ).toBeInTheDocument();
+    expect(fetchData).toHaveBeenCalled();
+  });
+
+  it("keeps the seed on screen when the background revalidation fails offline", async () => {
+    // A failed revalidation must not blank a passport we already painted.
+    sessionState.session = asSession({ isCurrentStudent: true });
+    sessionState.passport = passportWith(3);
+    const fetchData = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+
+    render(<Passport fetchData={fetchData} />);
+
+    expect(
+      await screen.findByText(/3 of 7 complete, 4 remaining/i),
+    ).toBeInTheDocument();
   });
 });
 

@@ -7,6 +7,7 @@ import { Landing } from "./Landing";
 
 const state = vi.hoisted(() => ({
   session: null as Session | null,
+  enrollment: null as EnrollmentStatus | null,
   loading: false,
 }));
 const signOut = vi.fn();
@@ -29,6 +30,7 @@ vi.mock("../../api/enrollment", () => ({
 
 afterEach(() => {
   state.session = null;
+  state.enrollment = null;
   state.loading = false;
   vi.clearAllMocks();
 });
@@ -180,6 +182,47 @@ describe("Landing staff routing (US-11)", () => {
     // Staff are redirected before the student enroll flow runs; /enrollment is
     // gated on current-student and would 403 anyway.
     expect(api.fetchEnrollmentStatus).not.toHaveBeenCalled();
+  });
+
+  it("renders from the bootstrap seed without asking /enrollment again", async () => {
+    state.session = asSession({});
+    state.enrollment = asStatus({
+      active_challenge: { id: 7, name: "Harry Potter Challenge" },
+    });
+
+    render(<Landing />);
+
+    expect(
+      await screen.findByRole("button", { name: /join the harry potter challenge/i }),
+    ).toBeInTheDocument();
+    // The hop this screen exists to stop making: the answer arrived with the session.
+    expect(api.fetchEnrollmentStatus).not.toHaveBeenCalled();
+  });
+
+  it("redirects a seeded, already-enrolled student straight to the passport", async () => {
+    state.session = asSession({});
+    state.enrollment = asStatus({ enrolled: true });
+
+    render(<Landing />);
+
+    // No spinner in between: the first paint already knows where this student goes.
+    expect(screen.getByText("redirect:/passport")).toBeInTheDocument();
+    expect(api.fetchEnrollmentStatus).not.toHaveBeenCalled();
+  });
+
+  it("falls back to fetching when the session arrived without a seed", async () => {
+    // Offline, or an eligible student whose bootstrap carried no enrollment. The
+    // screen must still be able to answer for itself.
+    state.session = asSession({});
+    state.enrollment = null;
+    api.fetchEnrollmentStatus.mockResolvedValue(asStatus());
+
+    render(<Landing />);
+
+    expect(
+      await screen.findByRole("button", { name: /join the stranger things challenge/i }),
+    ).toBeInTheDocument();
+    expect(api.fetchEnrollmentStatus).toHaveBeenCalled();
   });
 
   it("keeps a plain student on the student flow", async () => {
