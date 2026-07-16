@@ -46,9 +46,14 @@ class PrizeEligibleRow(BaseModel):
     ``required_completed``/``required_total`` are exported alongside the subject
     so a row can be audited without re-running the query: they are equal for
     every exported row, and seeing that is the point.
+
+    ``student_id`` is an int on the SQL backend and the opaque "<campus>#<sso>"
+    key on the Dynamo one (the seam's StudentId). The CSV keeps the column either
+    way — nothing downstream parses it, and re-exports stay diffable — so on Dynamo
+    it duplicates ``sso_subject``, which is harmless.
     """
 
-    student_id: int
+    student_id: int | str
     sso_subject: str
     required_completed: int
     required_total: int

@@ -16,9 +16,11 @@ from app.models.challenge import (
     AssessmentItem,
     AssessmentResponse,
     Challenge,
+    CheckIn,
+    Enrollment,
     Task,
 )
-from app.models.engagement import ContentView
+from app.models.engagement import ContentView, GuideSession
 from app.models.student import Student
 from app.schemas.challenge import (
     AssessmentItemUpdate,
@@ -304,6 +306,78 @@ class SqlAlchemyRepository:
             .group_by(ContentView.content_ref)
         ).all()
         return {ref: count for ref, count in rows}
+
+    # --- Reporting (FR-F1..F5) ----------------------------------------------
+    # Bulk challenge-scoped reads; the aggregation lives in services/reports.py.
+    # ``consistent`` is a no-op here (SQLite reads are already consistent) — it is
+    # only meaningful on the Dynamo GSI path.
+    def count_enrollments(self, challenge_id: int) -> int:
+        return (
+            self.db.scalar(
+                select(func.count())
+                .select_from(Enrollment)
+                .where(Enrollment.challenge_id == challenge_id)
+            )
+            or 0
+        )
+
+    def list_challenge_tasks(self, challenge_id: int):
+        return list(
+            self.db.execute(
+                select(Task)
+                .where(Task.challenge_id == challenge_id)
+                .order_by(Task.position)
+            ).scalars()
+        )
+
+    def list_challenge_checkins(self, challenge_id: int, *, consistent: bool = False):
+        return list(
+            self.db.execute(
+                select(CheckIn)
+                .join(Task, Task.id == CheckIn.task_id)
+                .where(Task.challenge_id == challenge_id)
+            ).scalars()
+        )
+
+    def count_guide_sessions(self, challenge_id: int) -> int:
+        return (
+            self.db.scalar(
+                select(func.count())
+                .select_from(GuideSession)
+                .where(GuideSession.challenge_id == challenge_id)
+            )
+            or 0
+        )
+
+    def list_challenge_items(self, challenge_id: int):
+        return list(
+            self.db.execute(
+                select(AssessmentItem)
+                .join(Task, Task.id == AssessmentItem.task_id)
+                .where(Task.challenge_id == challenge_id)
+            ).scalars()
+        )
+
+    def list_challenge_responses(self, challenge_id: int):
+        return list(
+            self.db.execute(
+                select(AssessmentResponse)
+                .join(
+                    AssessmentItem,
+                    AssessmentItem.id == AssessmentResponse.assessment_item_id,
+                )
+                .join(Task, Task.id == AssessmentItem.task_id)
+                .where(Task.challenge_id == challenge_id)
+            ).scalars()
+        )
+
+    def get_student_subjects(self, student_ids):
+        if not student_ids:
+            return {}
+        rows = self.db.execute(
+            select(Student.id, Student.sso_subject).where(Student.id.in_(student_ids))
+        ).all()
+        return {sid: subject for sid, subject in rows}
 
     # --- Themes -------------------------------------------------------------
     def list_themes(self):

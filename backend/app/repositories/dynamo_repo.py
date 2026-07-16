@@ -16,6 +16,12 @@ Multi-table model — one table per entity, mirroring the SQLite schema:
                               GSI ByTask           (task_id, ts)
                               GSI ByChallenge      (challenge_id, ts)
     {prefix}CheckInAudits     PK task_id (N), SK audit_id (S = "<ts>#<id>")
+    {prefix}AssessmentResponses PK student_id (S), SK assessment_item_id (N)
+                              GSI ByItem           (assessment_item_id, ts)
+                              GSI ByChallenge      (challenge_id, ts)
+    {prefix}ContentViews      PK challenge_id (N), SK view_id (S = "<ts>#<uuid>")
+    {prefix}GuideSessions     PK challenge_id (N), SK session_id (S)  [no writer yet]
+    {prefix}Enrollments GSI ByChallenge (challenge_id, enrolled_at)  [KEYS_ONLY]
     {prefix}Themes            PK id (S = the theme slug)
     {prefix}Counters          PK name (S), attr seq (N)   [integer-id allocation]
 
@@ -132,6 +138,7 @@ _TABLE_SUFFIXES = {
     "audits": "CheckInAudits",
     "responses": "AssessmentResponses",
     "views": "ContentViews",
+    "guide_sessions": "GuideSessions",
     "counters": "Counters",
     "themes": "Themes",
 }
@@ -186,6 +193,7 @@ class DynamoRepository:
         self.audits = t["audits"]
         self.responses = t["responses"]
         self.views = t["views"]
+        self.guide_sessions = t["guide_sessions"]
         self.counters = t["counters"]
         self.themes = t["themes"]
 
@@ -815,6 +823,96 @@ class DynamoRepository:
             ref = raw["content_ref"]
             counts[ref] = counts.get(ref, 0) + 1
         return counts
+
+    # --- Reporting (FR-F1..F5) ----------------------------------------------
+    def count_enrollments(self, challenge_id: int) -> int:
+        # The ByChallenge index is KEYS_ONLY and Select=COUNT returns a number with no
+        # items — the funnel denominator without paying to ship ~200 keys.
+        resp = self.enrollments.query(
+            IndexName="ByChallenge",
+            KeyConditionExpression=Key("challenge_id").eq(challenge_id),
+            Select="COUNT",
+        )
+        total = resp["Count"]
+        while "LastEvaluatedKey" in resp:
+            resp = self.enrollments.query(
+                IndexName="ByChallenge",
+                KeyConditionExpression=Key("challenge_id").eq(challenge_id),
+                Select="COUNT",
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+            )
+            total += resp["Count"]
+        return total
+
+    def list_challenge_tasks(self, challenge_id: int) -> list[TaskDTO]:
+        return self._tasks_for_challenge(challenge_id)
+
+    def list_challenge_checkins(
+        self, challenge_id: int, *, consistent: bool = False
+    ) -> list[CheckInDTO]:
+        if consistent:
+            # US-26 scenario 2: a just-recorded check-in must be in the export. A GSI
+            # cannot be read strongly-consistent, so scan the base table (which can) and
+            # filter to the challenge. Bounded — one challenge's check-ins, run a few
+            # times a semester — and correctness on the prize list is worth the scan.
+            rows: list[dict] = []
+            kw = {
+                "FilterExpression": Attr("challenge_id").eq(challenge_id),
+                "ConsistentRead": True,
+            }
+            resp = self.checkins.scan(**kw)
+            rows.extend(resp.get("Items", []))
+            while "LastEvaluatedKey" in resp:
+                resp = self.checkins.scan(
+                    ExclusiveStartKey=resp["LastEvaluatedKey"], **kw
+                )
+                rows.extend(resp.get("Items", []))
+        else:
+            rows = self._query_all(
+                self.checkins,
+                IndexName="ByChallenge",
+                KeyConditionExpression=Key("challenge_id").eq(challenge_id),
+            )
+        return [self._checkin_dto(r) for r in rows]
+
+    def count_guide_sessions(self, challenge_id: int) -> int:
+        # Nothing writes GuideSessions yet (the guide stores no transcript), so this is
+        # a structural zero today — but a real query, so the report stays honest the
+        # day US-16 starts writing rows, rather than hardcoding 0 here.
+        resp = self.guide_sessions.query(
+            KeyConditionExpression=Key("challenge_id").eq(challenge_id), Select="COUNT"
+        )
+        total = resp["Count"]
+        while "LastEvaluatedKey" in resp:
+            resp = self.guide_sessions.query(
+                KeyConditionExpression=Key("challenge_id").eq(challenge_id),
+                Select="COUNT",
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+            )
+            total += resp["Count"]
+        return total
+
+    def list_challenge_items(self, challenge_id: int) -> list[AssessmentItemDTO]:
+        rows = self._query_all(
+            self.items,
+            IndexName="ByChallenge",
+            KeyConditionExpression=Key("challenge_id").eq(challenge_id),
+        )
+        return [self._item_dto(r) for r in rows]
+
+    def list_challenge_responses(self, challenge_id: int) -> list[AssessmentResponseDTO]:
+        rows = self._query_all(
+            self.responses,
+            IndexName="ByChallenge",
+            KeyConditionExpression=Key("challenge_id").eq(challenge_id),
+        )
+        return [self._response_dto(r) for r in rows]
+
+    def get_student_subjects(self, student_ids) -> dict:
+        # On this backend the subject is the tail of the key ("<campus>#<sso>"), so it
+        # needs no read at all — but resolving it the same way both backends do keeps
+        # the service backend-agnostic and survives any future key-shape change.
+        return {sid: str(sid).split("#", 1)[-1] for sid in student_ids}
 
     # --- Manual completion override + audit (FR-D6 / US-27) -----------------
     @staticmethod
