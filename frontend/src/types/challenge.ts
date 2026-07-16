@@ -161,6 +161,26 @@ export interface CheckIn {
   verified_by: string | null;
 }
 
+/**
+ * One row of the live dashboard's recent feed.
+ *
+ * Note what is missing next to {@link CheckIn}: no `student_id`, no
+ * `student_subject`. The dashboard is projected at an event and identifies students
+ * by check-in number, so the server does not send the identity rather than sending it
+ * and trusting this screen not to render it.
+ */
+export interface CheckInSummaryRow {
+  id: number;
+  ts: string;
+  method: CheckInMethod;
+}
+
+/** The live dashboard's whole payload: a count and the newest few check-ins. */
+export interface CheckInSummary {
+  count: number;
+  recent: CheckInSummaryRow[];
+}
+
 /** How a response's score was arrived at. Never "ai" — no scorer here is one. */
 export type ScoredBy = "auto" | "human";
 

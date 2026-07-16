@@ -12,6 +12,8 @@ instead of moto (see tests/ddb_support.py) — the same assertions, AWS's own en
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -530,6 +532,47 @@ def test_get_and_list_checkins_for_a_task(repo):
     assert {s.sso_subject for _c, s in pairs} == {"alice@csub.edu", "bob@csub.edu"}
     for c, s in pairs:
         assert c.student_id == s.id
+
+
+def test_count_and_recent_checkins_for_the_live_dashboard(repo):
+    _ch, (t1, t2) = _built_challenge(repo)
+    students = [_student(repo, f"s{i}@csub.edu") for i in range(4)]
+    # Ascending timestamps, so "newest first" has exactly one right answer to assert.
+    base = datetime(2026, 9, 1, 10, 0, tzinfo=timezone.utc)
+    for i, stu in enumerate(students):
+        repo.create_manual_checkin(
+            campus_id="csub",
+            task=t1,
+            student=stu,
+            actor_subject="admin",
+            reason="r",
+            ts=base + timedelta(minutes=i),
+        )
+
+    assert repo.count_task_checkins(t1.id) == 4
+    # Scoped to the task, not the challenge — a sibling week's rows must not leak in.
+    assert repo.count_task_checkins(t2.id) == 0
+
+    recent = repo.list_recent_task_checkins(t1.id, 2)
+    assert len(recent) == 2  # truncated server-side, not by the caller
+    assert [c.student_id for c in recent] == [students[3].id, students[2].id]
+    # A limit past the end is not an error, and the feed stays newest-first.
+    assert len(repo.list_recent_task_checkins(t1.id, 50)) == 4
+    assert repo.list_recent_task_checkins(t2.id, 6) == []
+
+
+def test_build_passport_for_matches_build_passport(repo):
+    """The pre-resolved path must not be a second, subtly different derivation."""
+    _theme(repo)
+    ch = _challenge(repo, publish=False)
+    tasks = [repo.add_task(ch.id, TaskCreate(title=t)) for t in ("W1", "W2")]
+    repo.update_challenge("csub", ch.id, ChallengeUpdate(theme_id="stranger-things"))
+    repo.publish_challenge("csub", ch.id)
+    stu = _student(repo)
+    repo.record_event_qr_checkin("csub", stu.id, mint_event_token(tasks[0].id))
+
+    active = repo.get_active_challenge("csub")
+    assert repo.build_passport_for(active, stu.id) == repo.build_passport("csub", stu.id)
 
 
 def test_correct_checkin_records_prior_and_new_state(repo):

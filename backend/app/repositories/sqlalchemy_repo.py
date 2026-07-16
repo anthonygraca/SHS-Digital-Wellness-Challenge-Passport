@@ -145,6 +145,12 @@ class SqlAlchemyRepository:
     def list_task_checkins(self, task_id: int):
         return checkin_svc.list_task_checkins(self.db, task_id)
 
+    def count_task_checkins(self, task_id: int) -> int:
+        return checkin_svc.count_task_checkins(self.db, task_id)
+
+    def list_recent_task_checkins(self, task_id: int, limit: int):
+        return checkin_svc.list_recent_task_checkins(self.db, task_id, limit)
+
     def list_task_audits(self, task_id: int, student_id=None):
         return checkin_svc.list_task_audits(self.db, task_id, student_id)
 
@@ -319,6 +325,11 @@ class SqlAlchemyRepository:
     def build_passport(self, campus_id: str, student_id):
         return passport_svc.build_passport(
             self.db, campus_id=campus_id, student_id=student_id
+        )
+
+    def build_passport_for(self, challenge, student_id):
+        return passport_svc.build_passport_for(
+            self.db, challenge=challenge, student_id=student_id
         )
 
     def record_event_qr_checkin(self, campus_id: str, student_id, token: str):

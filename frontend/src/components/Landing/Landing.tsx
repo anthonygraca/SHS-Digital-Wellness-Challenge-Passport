@@ -27,12 +27,14 @@ import styles from "./Landing.module.css";
  * the Join CTA, which enrolls and lands on the passport.
  */
 export function Landing() {
-  const { session, loading, signOut } = useSession();
+  const { session, enrollment, loading, signOut } = useSession();
   // Themed copy (US-13). The palette lands once the passport is fetched, so this
   // pre-enrollment screen shows the default skin's title.
   const { appTitle } = useThemeCopy();
-  const [status, setStatus] = useState<EnrollmentStatus | null>(null);
-  const [statusLoading, setStatusLoading] = useState(true);
+  // Seeded from the bootstrap payload, which answered the enrollment question in the
+  // same request that established the session. Local state because Join mutates it.
+  const [status, setStatus] = useState<EnrollmentStatus | null>(enrollment);
+  const [statusLoading, setStatusLoading] = useState(enrollment == null);
   const [statusFailed, setStatusFailed] = useState(false);
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -51,6 +53,15 @@ export function Landing() {
 
   useEffect(() => {
     if (!isEligible) return;
+    // Bootstrap already answered this. Fetching again would re-introduce, at the cost
+    // of a round trip, exactly the hop this screen was changed to stop making.
+    if (enrollment) {
+      setStatus(enrollment);
+      setStatusLoading(false);
+      return;
+    }
+    // No seed: the provider is offline, or an eligible student arrived without one.
+    // The fetch stays as the fallback so this screen can still answer for itself.
     let cancelled = false;
     void loadStatus().then((res) => {
       if (cancelled) return;
@@ -61,7 +72,7 @@ export function Landing() {
     return () => {
       cancelled = true;
     };
-  }, [isEligible, loadStatus]);
+  }, [isEligible, enrollment, loadStatus]);
 
   const handleJoin = useCallback(async () => {
     setJoining(true);

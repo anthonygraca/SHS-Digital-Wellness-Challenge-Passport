@@ -2,14 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import * as api from "../../../api/challenges";
-import type { Challenge, CheckIn } from "../../../types/challenge";
+import type { Challenge, CheckInSummary } from "../../../types/challenge";
 import { CheckCircleIcon, SensorsIcon } from "../../icons";
 import { CompletionOverridePanel } from "../ChallengeBuilder/ChallengeBuilder";
 import styles from "./LiveOps.module.css";
 
-/** How often the check-in count refreshes while the dashboard is open. */
+/** How often the check-in count refreshes while the dashboard is *visible*. */
 const POLL_MS = 5000;
-const RECENT_LIMIT = 6;
 
 function relTime(ts: string, now: number) {
   const t = new Date(ts).getTime();
@@ -32,6 +31,11 @@ function relTime(ts: string, now: number) {
  * check-in count that refreshes while the event runs. This screen is meant to
  * be projected or shown at the door, so the feed identifies students only by
  * check-in number — full identities live behind the Manual override panel.
+ *
+ * That last sentence used to describe the *rendering* only. The screen fetched every
+ * check-in, subjects included, and chose to display just the number — so a machine
+ * pointed at a room held the roster in page state. It now polls a summary endpoint
+ * that has no identity to give it.
  */
 export function LiveOps() {
   const params = useParams();
@@ -40,7 +44,7 @@ export function LiveOps() {
   const taskId = Number(params.taskId);
 
   const [challenge, setChallenge] = useState<Challenge | null>(null);
-  const [checkins, setCheckins] = useState<CheckIn[] | null>(null);
+  const [summary, setSummary] = useState<CheckInSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [overriding, setOverriding] = useState(false);
   // Timestamp of the last successful poll, so relative times stay coherent.
@@ -62,13 +66,13 @@ export function LiveOps() {
 
   const refresh = useCallback(async () => {
     try {
-      const list = await api.listCheckIns(challengeId, taskId);
-      setCheckins(list);
+      const next = await api.getCheckInSummary(challengeId, taskId);
+      setSummary(next);
       setNow(Date.now());
     } catch (e) {
       // A failed poll keeps the last good count; the next tick retries. Only
       // surface the error while there is nothing on screen yet.
-      setCheckins((prev) => {
+      setSummary((prev) => {
         if (prev === null) {
           setError(e instanceof api.ApiError ? e.message : "Could not load check-ins");
         }
@@ -80,8 +84,39 @@ export function LiveOps() {
   useEffect(() => {
     if (!Number.isFinite(challengeId) || !Number.isFinite(taskId)) return;
     void refresh();
-    const id = window.setInterval(() => void refresh(), POLL_MS);
-    return () => window.clearInterval(id);
+
+    let id: number | undefined;
+    const start = () => {
+      if (id === undefined) id = window.setInterval(() => void refresh(), POLL_MS);
+    };
+    const stop = () => {
+      window.clearInterval(id);
+      id = undefined;
+    };
+
+    // Poll only while the tab is actually being looked at. This dashboard gets opened
+    // on a projector and left there: a screen forgotten overnight was making ~17,000
+    // requests before anyone came back to read it. Hiding also catches the laptop lid
+    // closing, and returning refreshes immediately so the count is never a tick stale.
+    //
+    // This, not the endpoint's ETag, is what makes an idle dashboard cheap: a 304
+    // still runs the Lambda and still reads DynamoDB — it only elides the body. The
+    // requests a hidden tab does not make are the ones that cost nothing.
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        stop();
+      } else {
+        void refresh();
+        start();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    if (document.visibilityState !== "hidden") start();
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      stop();
+    };
   }, [challengeId, taskId, refresh]);
 
   if (!Number.isFinite(challengeId) || !Number.isFinite(taskId)) {
@@ -89,11 +124,9 @@ export function LiveOps() {
   }
 
   const task = challenge?.tasks.find((t) => t.id === taskId) ?? null;
-  const recent = checkins
-    ? [...checkins]
-        .sort((a, b) => b.ts.localeCompare(a.ts))
-        .slice(0, RECENT_LIMIT)
-    : [];
+  // Already newest-first and already trimmed: the server's index does the ordering
+  // and the limit, so there is nothing left to sort or slice here.
+  const recent = summary?.recent ?? [];
 
   return (
     <div className={styles.page}>
@@ -148,7 +181,7 @@ export function LiveOps() {
                 <section className={styles.countCard}>
                   <h2 className={styles.cardLabel}>Checked in — live</h2>
                   <div className={styles.count} role="status">
-                    {checkins ? checkins.length : "—"}
+                    {summary ? summary.count : "—"}
                   </div>
                   <div className={styles.liveRow}>
                     <SensorsIcon size={15} />

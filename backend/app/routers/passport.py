@@ -38,7 +38,7 @@ def _event_qr_tip(title: str) -> str:
     )
 
 
-def _to_theme_config_out(cfg: ThemeConfigView | None) -> ThemeConfigOut | None:
+def to_theme_config_out(cfg: ThemeConfigView | None) -> ThemeConfigOut | None:
     if cfg is None:
         return None
     return ThemeConfigOut(
@@ -52,11 +52,13 @@ def _to_theme_config_out(cfg: ThemeConfigView | None) -> ThemeConfigOut | None:
     )
 
 
-def _to_passport_out(view: PassportView) -> PassportOut:
+def to_passport_out(view: PassportView) -> PassportOut:
+    """Serialize a PassportView. Public because /api/bootstrap embeds the same passport
+    verbatim — one mapper, so the two routes can never drift into different shapes."""
     return PassportOut(
         challengeName=view.challenge_name,
         theme=view.theme,
-        themeConfig=_to_theme_config_out(view.theme_config),
+        themeConfig=to_theme_config_out(view.theme_config),
         totalWeeks=view.total_weeks,
         completedWeeks=view.completed_weeks,
         remainingWeeks=view.remaining_weeks,
@@ -100,7 +102,7 @@ def get_passport(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="No active challenge"
         )
-    return _to_passport_out(view)
+    return to_passport_out(view)
 
 
 @router.post("/api/checkins/scan", response_model=CheckInResult)
@@ -150,7 +152,7 @@ def scan_checkin(
     )
 
     return CheckInResult(
-        passport=_to_passport_out(view),
+        passport=to_passport_out(view),
         tip=_event_qr_tip(title),
         weekNo=week_no,
         title=title,

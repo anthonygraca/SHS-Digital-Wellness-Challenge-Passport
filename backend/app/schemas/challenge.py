@@ -321,6 +321,33 @@ class CheckInOut(BaseModel):
     verified_by: str | None
 
 
+class CheckInSummaryRow(BaseModel):
+    """One row of the live dashboard's recent feed.
+
+    Note what is *absent*: no ``student_id``, no ``student_subject``. This screen is
+    projected at an event, and it identifies students by check-in number — so the
+    identity is left out of the payload rather than sent and then not rendered.
+    ``CheckInOut`` (which carries both) still serves the manual-override panel, where
+    an admin has clicked through to act on a specific student.
+    """
+
+    id: int
+    ts: datetime
+    method: str
+
+
+class CheckInSummaryOut(BaseModel):
+    """The live dashboard's whole payload: a count and the newest few check-ins.
+
+    Replaces listing every check-in and counting/sorting client-side — ~1 KB per poll
+    instead of ~200 rows, and the recent feed's ordering and length are the index's
+    job rather than the browser's.
+    """
+
+    count: int
+    recent: list[CheckInSummaryRow]
+
+
 class AssessmentResponseOut(BaseModel):
     """A student's scored response as the admin sees it (FR-E5).
 

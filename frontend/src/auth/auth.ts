@@ -1,5 +1,3 @@
-import type { Session } from "../types/session";
-
 // Relative paths: proxied to FastAPI in dev, same-origin in prod.
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -15,16 +13,13 @@ export function startLogin(): void {
   );
 }
 
-/** Fetch the current session, or null if not signed in. */
-export async function fetchSession(): Promise<Session | null> {
-  const res = await fetch(`${API_BASE}/auth/session`, {
-    credentials: "include",
-  });
-  if (!res.ok) return null;
-  return (await res.json()) as Session;
-}
-
-/** Clear the session on the server. */
+/**
+ * Clear the session on the server.
+ *
+ * The session *read* is not here: it arrives with the enrollment and passport in one
+ * payload (api/bootstrap.ts), which is the only place the app needs it. GET
+ * /auth/session still exists server-side and is still the authority on the shape.
+ */
 export async function logout(): Promise<void> {
   await fetch(`${API_BASE}/auth/logout`, {
     method: "POST",

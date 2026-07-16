@@ -17,6 +17,7 @@ import type {
   CheckInAudit,
   CheckInCorrect,
   CheckInRemove,
+  CheckInSummary,
   ManualCheckInCreate,
 } from "../types/challenge";
 import { request as httpRequest } from "./http";
@@ -192,11 +193,28 @@ export function overrideAssessmentScore(
 // Manual completion override + audit (FR-D6 / US-27)
 // ---------------------------------------------------------------------------
 
+/**
+ * Every check-in for a task, each with the student's subject.
+ *
+ * For the manual-override panel, where an admin has clicked through to act on a
+ * named student. The live dashboard uses {@link getCheckInSummary} instead — it needs
+ * a count, not a roster, and it is projected in a room.
+ */
 export function listCheckIns(
   challengeId: number,
   taskId: number,
 ): Promise<CheckIn[]> {
   return request<CheckIn[]>(`/${challengeId}/tasks/${taskId}/checkins`);
+}
+
+/** The live dashboard's count + recent feed — no identities (FR-D4 / US-28). */
+export function getCheckInSummary(
+  challengeId: number,
+  taskId: number,
+): Promise<CheckInSummary> {
+  return request<CheckInSummary>(
+    `/${challengeId}/tasks/${taskId}/checkins/summary`,
+  );
 }
 
 export function createManualCheckIn(
