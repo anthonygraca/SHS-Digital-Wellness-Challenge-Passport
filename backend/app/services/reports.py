@@ -5,34 +5,27 @@ module derives one student's progress, this one reads across all of them. Both
 answer "is this week complete?" the same way — a CheckIn row for the week's Task
 — so the funnel and a student's own passport can never disagree.
 
+Persistence-agnostic: every function takes a ``Repository`` and a resolved challenge,
+never a Session. The repository supplies the challenge-scoped bulk reads; the
+*aggregation* — distinct students vs raw captures, the outer join that keeps a zero
+week or tag visible, the eligibility rule — lives here, defined once for both backends.
+
 Nothing is cached or stored: every request re-derives the answer, so a check-in
 recorded a second ago is in the next refresh (US-21, scenario 2) and in the next
-export (US-26, scenario 2).
+export (US-26, scenario 2). On DynamoDB the dashboards read a GSI, which lags the base
+table by well under a second; the prize export cannot tolerate even that (real prizes),
+so it alone reads strongly-consistent — see ``prize_eligible_students``.
 
 participation_report, attendance_report, engagement_report and
 learning_outcome_report are aggregate (FR-F6); prize_eligible_students is the one
 per-student read here, because a drawing list has to name its entrants.
-
-engagement_report is the one report whose rows exist only because it wants them:
-check-ins and enrollments are written by features that would exist anyway, where
-a ContentView is written by instrumentation US-23 added (services/engagement.py).
 """
 
 from __future__ import annotations
 
-from sqlalchemy import case, func, select
-from sqlalchemy.orm import Session
+from collections import defaultdict
+from typing import TYPE_CHECKING
 
-from app.models.challenge import (
-    AssessmentItem,
-    AssessmentResponse,
-    Challenge,
-    CheckIn,
-    Enrollment,
-    Task,
-)
-from app.models.engagement import ContentView, GuideSession
-from app.models.student import Student
 from app.schemas.report import (
     CONTENT_REF_ORDER,
     METHOD_ORDER,
@@ -48,144 +41,98 @@ from app.schemas.report import (
     WeekCompletionOut,
 )
 
+if TYPE_CHECKING:
+    from app.repositories.base import Repository
 
-def participation_report(db: Session, challenge: Challenge) -> ParticipationReportOut:
+
+def _mean(scores: list[float]) -> float | None:
+    """Mean over the rows, or None over none.
+
+    Computed across every response, never folded up from per-tag means: averaging
+    the means would weight a tag with three responses the same as one with three
+    hundred, which is a different — and wrong — answer to "how did the cohort do".
+    """
+    return sum(scores) / len(scores) if scores else None
+
+
+def participation_report(repo: Repository, challenge) -> ParticipationReportOut:
     """Total enrollments plus the per-week completion funnel for one challenge.
 
-    The caller resolves the challenge campus-scoped; filtering both queries by
-    its id is what keeps another campus's rows out of the counts.
-    """
-    total_enrollments = (
-        db.scalar(
-            select(func.count())
-            .select_from(Enrollment)
-            .where(Enrollment.challenge_id == challenge.id)
-        )
-        or 0
-    )
+    count(distinct student_id) rather than count(*): uq_checkin_student_task already
+    makes those equal, but the funnel counts *students*, and building the per-task set
+    of student ids keeps that honest if the constraint ever loosens.
 
-    # LEFT OUTER JOIN, not an inner one: a week nobody has finished yet must
-    # still appear in the funnel as a zero, otherwise the drop-off the report
-    # exists to show would be invisible.
-    #
-    # count(distinct student_id) rather than count(*): uq_checkin_student_task
-    # already makes those equal, but the funnel counts *students*, and saying so
-    # keeps the query honest if that constraint ever loosens.
-    rows = db.execute(
-        select(
-            Task.id,
-            Task.position,
-            Task.title,
-            Task.required,
-            func.count(func.distinct(CheckIn.student_id)).label("completed_count"),
-        )
-        .outerjoin(CheckIn, CheckIn.task_id == Task.id)
-        .where(Task.challenge_id == challenge.id)
-        .group_by(Task.id, Task.position, Task.title, Task.required)
-        .order_by(Task.position)
-    ).all()
+    Every task appears, even one nobody has finished — the Python analogue of the SQL
+    LEFT OUTER JOIN — otherwise the drop-off the report exists to show would vanish.
+    """
+    tasks = repo.list_challenge_tasks(challenge.id)
+    checkins = repo.list_challenge_checkins(challenge.id)
+
+    students_by_task: dict[int, set] = defaultdict(set)
+    for c in checkins:
+        students_by_task[c.task_id].add(c.student_id)
 
     return ParticipationReportOut(
         challenge=ReportChallengeOut.model_validate(challenge),
-        total_enrollments=total_enrollments,
+        total_enrollments=repo.count_enrollments(challenge.id),
         weeks=[
             WeekCompletionOut(
-                task_id=task_id,
-                week_no=position,
-                title=title,
-                required=required,
-                completed_count=completed_count,
+                task_id=t.id,
+                week_no=t.position,
+                title=t.title,
+                required=t.required,
+                completed_count=len(students_by_task.get(t.id, ())),
             )
-            for task_id, position, title, required, completed_count in rows
+            for t in tasks
         ],
     )
 
 
-def attendance_report(db: Session, challenge: Challenge) -> AttendanceReportOut:
+def attendance_report(repo: Repository, challenge) -> AttendanceReportOut:
     """Check-in counts broken down by capture method for one challenge (FR-F2).
 
-    CheckIn carries no challenge_id, so the scope comes from a join through Task:
-    a check-in belongs to the challenge its task belongs to. That join does here
-    what the challenge_id filter does in participation_report — it is the only
-    thing keeping another campus's check-ins out of the counts.
+    count(*), not count(distinct student_id) as the funnel uses: this counts
+    *captures*, not students. One student scanning six weeks is six units of effort
+    the system saved, and six is the honest number.
 
-    count(*), not count(distinct student_id) as the funnel uses: this report
-    counts *captures*, not students. One student scanning six weeks is six units
-    of effort the system saved, and six is the honest number.
+    All three buckets are shown even at zero — "staff: 0" is a finding (nothing writes
+    that method today), not an absence to hide — and the total counts every row rather
+    than summing the buckets, so a method outside CheckInMethod would surface as a gap
+    in the reconciliation rather than being silently dropped.
     """
-    rows = db.execute(
-        select(CheckIn.method, func.count().label("count"))
-        .join(Task, Task.id == CheckIn.task_id)
-        .where(Task.challenge_id == challenge.id)
-        .group_by(CheckIn.method)
-    ).all()
+    checkins = repo.list_challenge_checkins(challenge.id)
 
-    # GROUP BY only emits methods that have rows, but the report owes the reader
-    # all three buckets: "staff: 0" is a finding — nothing writes that method
-    # today — not an absence to hide. Same reason the funnel keeps its zero
-    # weeks. Seeding from METHOD_ORDER also fixes the order the client renders in.
     counts = dict.fromkeys(METHOD_ORDER, 0)
-    for method, count in rows:
-        if method in counts:
-            counts[method] = count
-
-    # Counted across every row, not summed from the buckets above. A method
-    # outside CheckInMethod would be a write-path bug; a total that quietly
-    # dropped it would hide the bug, where this makes it surface as a gap in the
-    # reconciliation the report promises. No write path can mint one today.
-    total_checkins = sum(count for _, count in rows)
+    for c in checkins:
+        if c.method in counts:
+            counts[c.method] += 1
 
     return AttendanceReportOut(
         challenge=ReportChallengeOut.model_validate(challenge),
-        total_checkins=total_checkins,
+        total_checkins=len(checkins),
         methods=[
             MethodCountOut(method=method, count=count) for method, count in counts.items()
         ],
     )
 
 
-def engagement_report(db: Session, challenge: Challenge) -> EngagementReportOut:
+def engagement_report(repo: Repository, challenge) -> EngagementReportOut:
     """Content views and guide sessions for one challenge (FR-F3 / US-23).
 
-    Two counts from two tables, because the two things engage differently.
-    ContentView carries no challenge_id and is scoped by the join through Task —
-    the same join, for the same reason, as attendance_report's. GuideSession
-    carries challenge_id directly: a chat is not about a week, so there is no task
-    to inherit the scope from.
-
-    count(*), not count(distinct student_id), like the attendance report and
-    unlike the funnel: this counts *views*, not viewers. A student who opens the
-    same week on Monday and again on Friday engaged twice, and two is the honest
-    number.
+    count(*), not count(distinct student_id): this counts *views*, not viewers. A
+    student who opens the same week twice engaged twice. Every ref is shown, always,
+    in a fixed order — the same guarantee the method buckets make.
     """
-    rows = db.execute(
-        select(ContentView.content_ref, func.count().label("count"))
-        .join(Task, Task.id == ContentView.task_id)
-        .where(Task.challenge_id == challenge.id)
-        .group_by(ContentView.content_ref)
-    ).all()
+    view_counts = repo.count_content_views(challenge.id)
 
-    # Every ref, always, in a fixed order — the same guarantee the method buckets
-    # make. "tip: 0" is a finding (nobody has scanned yet), not an absence to hide.
     counts = dict.fromkeys(CONTENT_REF_ORDER, 0)
-    for content_ref, count in rows:
+    for content_ref, count in view_counts.items():
         if content_ref in counts:
             counts[content_ref] = count
 
-    # Counted across every row rather than summed from the buckets, exactly as
-    # attendance_report's total is: a ref outside ContentRef would be a write-path
-    # bug, and a total that quietly dropped it would hide the bug where this makes
-    # it surface as a gap in the reconciliation the report promises.
-    total_content_views = sum(count for _, count in rows)
-
-    guide_sessions = (
-        db.scalar(
-            select(func.count())
-            .select_from(GuideSession)
-            .where(GuideSession.challenge_id == challenge.id)
-        )
-        or 0
-    )
+    # Total over every recorded view, including a ref outside ContentRef (a write-path
+    # bug), so it surfaces as a reconciliation gap rather than being hidden.
+    total_content_views = sum(view_counts.values())
 
     return EngagementReportOut(
         challenge=ReportChallengeOut.model_validate(challenge),
@@ -194,162 +141,113 @@ def engagement_report(db: Session, challenge: Challenge) -> EngagementReportOut:
             ContentRefCountOut(content_ref=content_ref, count=count)
             for content_ref, count in counts.items()
         ],
-        guide_sessions=guide_sessions,
+        guide_sessions=repo.count_guide_sessions(challenge.id),
     )
 
 
-def learning_outcome_report(
-    db: Session, challenge: Challenge
-) -> LearningOutcomeReportOut:
+def learning_outcome_report(repo: Repository, challenge) -> LearningOutcomeReportOut:
     """Mean assessment score per learning-outcome tag (FR-F4 / US-24).
 
-    The tag lives on AssessmentItem and is reached by joining, never copied onto
-    the response (models/challenge.py argues why: copying would fork history, and
-    retagging an item would leave its old scores filed under the old tag). So the
-    grouping key comes from the item, and the scores come from its responses.
+    The tag lives on the item and is reached through it, never copied onto the response
+    (models/challenge.py: copying would fork history, and retagging an item would leave
+    old scores under the old tag). So the grouping key comes from the items.
 
-    Scoped by a join through Task to challenge_id — the same join, for the same
-    reason, as attendance_report's and engagement_report's, just one hop longer:
-    a response belongs to the challenge its item's task belongs to. That join is
-    the only thing keeping another campus's scores out of these means.
+    Driven from the item tag set with an **outer** join to the responses, not from the
+    responses inward: a tag whose items nobody has answered yet must still appear, as
+    response_count 0 and mean_score None. Seeding the buckets from the challenge's own
+    items is what makes "nobody has answered anything tagged sleep-hygiene" a finding
+    the report states rather than a row it silently omits.
 
-    Driven from AssessmentItem with an **outer** join to the responses, not from
-    AssessmentResponse inward. This is the funnel's LEFT OUTER JOIN argument in
-    another vocabulary: a tag whose items nobody has answered yet must still
-    appear, as response_count 0 and mean_score None. The other two reports get
-    that guarantee by seeding their buckets from a constant, which cannot work
-    here — an outcome tag is admin-authored free text, so there is no constant to
-    seed from. But the tag set is still knowable, because the challenge's own
-    items enumerate it, and reading it off them is what makes "nobody has answered
-    anything tagged sleep-hygiene" a finding the report states rather than a row
-    it silently omits. An inner join would quietly describe only the answered
-    tags, which is a different report than the one FR-F4 asks for.
-
-    No filter on scored_by: a human-overridden score is a score, and including it
-    is the whole of US-24's second scenario. It is counted separately as well as
-    included, so the aggregate can be read without taking that on faith.
+    No filter on scored_by: a human-overridden score is a score (US-24 scenario 2). It
+    is counted separately as well as included, so the aggregate can be read without
+    taking that on faith.
     """
-    rows = db.execute(
-        select(
-            AssessmentItem.outcome_tag,
-            func.count(AssessmentResponse.id).label("response_count"),
-            func.avg(AssessmentResponse.score).label("mean_score"),
-            func.sum(case((AssessmentResponse.scored_by == "human", 1), else_=0)).label(
-                "human_scored_count"
-            ),
-        )
-        .select_from(AssessmentItem)
-        .join(Task, Task.id == AssessmentItem.task_id)
-        .outerjoin(
-            AssessmentResponse,
-            AssessmentResponse.assessment_item_id == AssessmentItem.id,
-        )
-        .where(Task.challenge_id == challenge.id)
-        .group_by(AssessmentItem.outcome_tag)
-        # Alphabetical, because there is no meaningful order to seed from and the
-        # rows have to land somewhere fixed. Ordering by score instead would move
-        # a row every time its mean ticked over a rounding boundary, so a card an
-        # admin refreshes would reshuffle under them; the tag is stable, and two
-        # reads of unchanged data agreeing is worth more here than ranking.
-        .order_by(AssessmentItem.outcome_tag)
-    ).all()
+    items = repo.list_challenge_items(challenge.id)
+    responses = repo.list_challenge_responses(challenge.id)
 
-    # Counted across every response rather than folded up from the buckets, as
-    # attendance_report's total is and for the same reason. The mean especially:
-    # averaging the per-tag means would weight a tag with three responses the same
-    # as one with three hundred, which is a different — and wrong — answer to
-    # "how did the cohort do". avg() over every row weights by response, which is
-    # the honest one. Over no rows it is NULL, and None is what the schema wants.
-    total_responses, total_mean, total_human = db.execute(
-        select(
-            func.count(AssessmentResponse.id),
-            func.avg(AssessmentResponse.score),
-            func.sum(case((AssessmentResponse.scored_by == "human", 1), else_=0)),
-        )
-        .select_from(AssessmentResponse)
-        .join(
-            AssessmentItem,
-            AssessmentItem.id == AssessmentResponse.assessment_item_id,
-        )
-        .join(Task, Task.id == AssessmentItem.task_id)
-        .where(Task.challenge_id == challenge.id)
-    ).one()
+    tag_by_item = {item.id: item.outcome_tag for item in items}
+    # Seed every tag the challenge's items carry, so an unanswered tag is a zero row.
+    scores_by_tag: dict[str, list[float]] = {tag: [] for tag in tag_by_item.values()}
+    human_by_tag: dict[str, int] = defaultdict(int)
+
+    all_scores: list[float] = []
+    total_human = 0
+    for r in responses:
+        tag = tag_by_item.get(r.assessment_item_id)
+        if tag is None:
+            continue  # a response whose item is gone — outside this report's scope
+        scores_by_tag.setdefault(tag, []).append(r.score)
+        all_scores.append(r.score)
+        if r.scored_by == "human":
+            human_by_tag[tag] += 1
+            total_human += 1
 
     return LearningOutcomeReportOut(
         challenge=ReportChallengeOut.model_validate(challenge),
-        total_responses=total_responses or 0,
-        mean_score=total_mean,
-        # sum() over no rows is NULL, where count() is already 0.
-        total_human_scored=total_human or 0,
+        total_responses=len(all_scores),
+        mean_score=_mean(all_scores),
+        total_human_scored=total_human,
         outcomes=[
             OutcomeScoreOut(
-                outcome_tag=outcome_tag,
-                mean_score=mean_score,
-                response_count=response_count,
-                human_scored_count=human_scored_count or 0,
+                outcome_tag=tag,
+                mean_score=_mean(scores_by_tag[tag]),
+                response_count=len(scores_by_tag[tag]),
+                human_scored_count=human_by_tag.get(tag, 0),
             )
-            for outcome_tag, response_count, mean_score, human_scored_count in rows
+            # Alphabetical: there is no meaningful order to seed from, and two reads of
+            # unchanged data agreeing is worth more than ranking by a mean that moves.
+            for tag in sorted(scores_by_tag)
         ],
     )
 
 
-def prize_eligible_students(db: Session, challenge: Challenge) -> list[PrizeEligibleRow]:
+def prize_eligible_students(repo: Repository, challenge) -> list[PrizeEligibleRow]:
     """Students who have completed every required task of one challenge (FR-F5 / US-26).
 
-    The same rule passport.py derives for a single student, expressed set-wise for
-    the whole cohort: restrict to the challenge's *required* tasks, then keep the
-    students whose distinct completions cover all of them. Optional tasks fall out
-    of the query rather than being filtered later, which is why finishing or
-    skipping one can never change eligibility.
+    The same rule passport.py derives for a single student, expressed set-wise for the
+    whole cohort: restrict to the challenge's *required* tasks, then keep the students
+    whose distinct completions cover all of them. Optional tasks fall out rather than
+    being filtered later, so finishing or skipping one can never change eligibility.
 
-    Derived per call, never stored — so an export run a second after a student's
-    final check-in already contains them (US-26, scenario 2).
+    Reads strongly-consistent (``consistent=True``): the export is a record an admin
+    acts on, and US-26 scenario 2 requires a student's final check-in to appear in an
+    export run a moment later. A GSI cannot promise that; the base table can.
+
+    No required tasks means nobody is eligible, not everybody — the guard passport.py
+    also applies, so an all-optional challenge never exports the whole cohort for free.
     """
-    required_ids = list(
-        db.execute(
-            select(Task.id).where(
-                Task.challenge_id == challenge.id, Task.required.is_(True)
-            )
-        ).scalars()
-    )
-
-    # No required tasks means nobody is eligible, not everybody: the same guard
-    # passport.py applies (``required_total > 0``) so an all-optional challenge
-    # never exports the whole cohort for free. Also avoids a HAVING count == 0.
+    required_ids = {t.id for t in repo.list_challenge_tasks(challenge.id) if t.required}
     if not required_ids:
         return []
 
-    # Enrollment is deliberately not joined. Passport eligibility doesn't consult
-    # it either, and campus isolation already comes from the caller-resolved
-    # challenge — joining it here could drop a student who has check-ins but no
-    # enrollment row, making this export disagree with that student's own passport.
-    #
-    # The HAVING *is* the "completed every required task" rule: count(distinct
-    # task_id) over the required set can only reach len(required_ids) when the
-    # student has one check-in per required task.
-    rows = db.execute(
-        select(
-            Student.id,
-            Student.sso_subject,
-            func.count(func.distinct(CheckIn.task_id)).label("required_completed"),
-            func.max(CheckIn.ts).label("eligible_since"),
-        )
-        .join(CheckIn, CheckIn.student_id == Student.id)
-        .where(CheckIn.task_id.in_(required_ids))
-        .group_by(Student.id, Student.sso_subject)
-        .having(func.count(func.distinct(CheckIn.task_id)) == len(required_ids))
-        # Ordered so two exports of unchanged data are byte-identical: the drawing
-        # list is a record, and a diff between re-exports should mean something.
-        .order_by(func.max(CheckIn.ts), Student.id)
-    ).all()
+    checkins = repo.list_challenge_checkins(challenge.id, consistent=True)
 
-    return [
-        PrizeEligibleRow(
-            student_id=student_id,
-            sso_subject=sso_subject,
-            required_completed=required_completed,
-            required_total=len(required_ids),
-            eligible_since=eligible_since,
-        )
-        for student_id, sso_subject, required_completed, eligible_since in rows
+    completed: dict = defaultdict(set)
+    eligible_since: dict = {}
+    for c in checkins:
+        if c.task_id not in required_ids:
+            continue
+        completed[c.student_id].add(c.task_id)
+        # The latest check-in among the required set is when they qualified.
+        if c.student_id not in eligible_since or c.ts > eligible_since[c.student_id]:
+            eligible_since[c.student_id] = c.ts
+
+    eligible_ids = [
+        sid for sid, done in completed.items() if len(done) == len(required_ids)
     ]
+    subjects = repo.get_student_subjects(eligible_ids)
+
+    rows = [
+        PrizeEligibleRow(
+            student_id=sid,
+            sso_subject=subjects.get(sid, ""),
+            required_completed=len(completed[sid]),
+            required_total=len(required_ids),
+            eligible_since=eligible_since[sid],
+        )
+        for sid in eligible_ids
+    ]
+    # Ordered so two exports of unchanged data are byte-identical: the drawing list is a
+    # record, and a diff between re-exports should mean something.
+    rows.sort(key=lambda r: (r.eligible_since, str(r.student_id)))
+    return rows

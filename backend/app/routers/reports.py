@@ -6,11 +6,9 @@ import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy.orm import Session
 
 from app.auth.deps import require_admin
-from app.db import get_db
-from app.models.challenge import Challenge
+from app.repositories.base import Repository, get_repo
 from app.schemas.enrollment import (
     NO_ACTIVE_CHALLENGE_CODE,
     NO_ACTIVE_CHALLENGE_MESSAGE,
@@ -21,7 +19,6 @@ from app.schemas.report import (
     LearningOutcomeReportOut,
     ParticipationReportOut,
 )
-from app.services import challenges as challenge_svc
 from app.services import reports as report_svc
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -35,9 +32,7 @@ PRIZE_CSV_COLUMNS = [
 ]
 
 
-def _report_challenge_or_404(
-    db: Session, claims: dict, challenge_id: int | None
-) -> Challenge:
+def _report_challenge_or_404(repo: Repository, claims: dict, challenge_id: int | None):
     """Resolve the challenge every report in this router describes.
 
     Omit ``challenge_id`` and this answers for the campus's active challenge —
@@ -62,9 +57,9 @@ def _report_challenge_or_404(
     one dashboard can never disagree about which challenge they describe.
     """
     if challenge_id is None:
-        challenge = challenge_svc.get_active_challenge_for_campus(db, claims["campus_id"])
+        challenge = repo.get_active_challenge(claims["campus_id"])
     else:
-        challenge = challenge_svc.get_challenge(db, claims["campus_id"], challenge_id)
+        challenge = repo.get_challenge(claims["campus_id"], challenge_id)
         if challenge is not None and challenge.status != "published":
             challenge = None
 
@@ -97,7 +92,7 @@ def _utc_iso(ts: datetime) -> str:
     )
 
 
-def _prize_csv_filename(challenge: Challenge) -> str:
+def _prize_csv_filename(challenge) -> str:
     """A filename an admin can recognise in their downloads folder.
 
     The semester is admin-entered free text, so anything outside [A-Za-z0-9] is
@@ -114,11 +109,11 @@ def _prize_csv_filename(challenge: Challenge) -> str:
 def participation_report(
     challenge_id: int | None = Query(None),
     claims: dict = Depends(require_admin),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """Participation and the per-week completion funnel (FR-F1 / US-21)."""
     return report_svc.participation_report(
-        db, _report_challenge_or_404(db, claims, challenge_id)
+        repo, _report_challenge_or_404(repo, claims, challenge_id)
     )
 
 
@@ -126,7 +121,7 @@ def participation_report(
 def attendance_report(
     challenge_id: int | None = Query(None),
     claims: dict = Depends(require_admin),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """Auto-vs-manual attendance breakdown (FR-F2 / US-22).
 
@@ -136,7 +131,7 @@ def attendance_report(
     same way, so they always answer for the same one and 404 together.
     """
     return report_svc.attendance_report(
-        db, _report_challenge_or_404(db, claims, challenge_id)
+        repo, _report_challenge_or_404(repo, claims, challenge_id)
     )
 
 
@@ -144,7 +139,7 @@ def attendance_report(
 def engagement_report(
     challenge_id: int | None = Query(None),
     claims: dict = Depends(require_admin),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """Content views and guide usage (FR-F3 / US-23).
 
@@ -157,7 +152,7 @@ def engagement_report(
     on one dashboard always describe the same challenge.
     """
     return report_svc.engagement_report(
-        db, _report_challenge_or_404(db, claims, challenge_id)
+        repo, _report_challenge_or_404(repo, claims, challenge_id)
     )
 
 
@@ -165,7 +160,7 @@ def engagement_report(
 def learning_outcome_report(
     challenge_id: int | None = Query(None),
     claims: dict = Depends(require_admin),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """Mean assessment score per learning-outcome tag (FR-F4 / US-24).
 
@@ -179,7 +174,7 @@ def learning_outcome_report(
     semesters, which is the thing an id makes possible at all.
     """
     return report_svc.learning_outcome_report(
-        db, _report_challenge_or_404(db, claims, challenge_id)
+        repo, _report_challenge_or_404(repo, claims, challenge_id)
     )
 
 
@@ -187,7 +182,7 @@ def learning_outcome_report(
 def prize_eligible_csv(
     challenge_id: int | None = Query(None),
     claims: dict = Depends(require_admin),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """The prize drawing list as CSV (FR-F5 / US-26).
 
@@ -205,8 +200,8 @@ def prize_eligible_csv(
     enough to build in memory, and the whole body has to exist anyway to set an
     accurate download.
     """
-    challenge = _report_challenge_or_404(db, claims, challenge_id)
-    rows = report_svc.prize_eligible_students(db, challenge)
+    challenge = _report_challenge_or_404(repo, claims, challenge_id)
+    rows = report_svc.prize_eligible_students(repo, challenge)
 
     buf = io.StringIO()
     writer = csv.writer(buf)

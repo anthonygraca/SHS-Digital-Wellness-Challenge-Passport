@@ -221,6 +221,37 @@ Resources:
             Path: /api/assessments/{proxy+}
             Method: ANY
 
+  # Read-only across the cohort's data (FR-F1..F5). No writes: every report re-derives
+  # from rows other features already wrote. The prize export reads CheckIns
+  # strongly-consistent (base table), which DynamoDBReadPolicy already covers.
+  ReportsFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.functions.reports.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Challenges"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Tasks"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Enrollments"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}CheckIns"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}AssessmentItems"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}AssessmentResponses"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}ContentViews"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}GuideSessions"
+      Events:
+        Reports:
+          Type: HttpApi
+          Properties:
+            Path: /api/reports/{proxy+}
+            Method: ANY
+
   # The guide holds no data at all — routers/guide.py takes no db and writes no
   # transcript, deliberately (see its docstring). So: no table, no policy.
   GuideFn:
@@ -378,11 +409,26 @@ Resources:
           AttributeType: S
         - AttributeName: challenge_id
           AttributeType: N
+        - AttributeName: enrolled_at
+          AttributeType: S
       KeySchema:
         - AttributeName: student_id
           KeyType: HASH
         - AttributeName: challenge_id
           KeyType: RANGE
+      GlobalSecondaryIndexes:
+        # The base key answers "is THIS student enrolled?"; the participation report
+        # needs "how many are enrolled in this challenge?", which the base key cannot
+        # serve. KEYS_ONLY because the report only counts — Select=COUNT ships a number,
+        # not ~200 keys.
+        - IndexName: ByChallenge
+          KeySchema:
+            - AttributeName: challenge_id
+              KeyType: HASH
+            - AttributeName: enrolled_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: KEYS_ONLY
 
   CheckInsTable:
     Type: AWS::DynamoDB::Table
@@ -520,6 +566,26 @@ Resources:
         - AttributeName: challenge_id
           KeyType: HASH
         - AttributeName: view_id
+          KeyType: RANGE
+
+  # One student's conversation with the wellness guide (FR-F3 / US-23). Nothing writes
+  # it yet — the guide stores no transcript (routers/guide.py) — so the engagement
+  # report counts a structural zero here. It exists so that count is a real query on
+  # both backends rather than a hardcoded 0, honest the day US-16 starts writing rows.
+  GuideSessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TablePrefix}GuideSessions"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: challenge_id
+          AttributeType: N
+        - AttributeName: session_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: challenge_id
+          KeyType: HASH
+        - AttributeName: session_id
           KeyType: RANGE
 
   # Global re-skin presets (FR-B4 / US-13). The id is a slug that doubles as the

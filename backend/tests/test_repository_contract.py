@@ -688,6 +688,95 @@ def test_a_refused_checkin_leaves_no_orphan_audit_row(repo):
     assert "never happened" not in [a.reason for a in audits]
 
 
+# --- reporting reads (FR-F1..F5) --------------------------------------------
+def test_count_enrollments(repo):
+    ch, _ = _built_challenge(repo, titles=("W1",))
+    assert repo.count_enrollments(ch.id) == 0
+    repo.enroll(_student(repo, "a@csub.edu").id, ch.id)
+    repo.enroll(_student(repo, "b@csub.edu").id, ch.id)
+    assert repo.count_enrollments(ch.id) == 2
+
+
+def test_list_challenge_checkins_spans_tasks_and_carries_method(repo):
+    ch, (t1, t2) = _built_challenge(repo)
+    alice = _student(repo, "alice@csub.edu")
+    bob = _student(repo, "bob@csub.edu")
+    repo.record_event_qr_checkin("csub", alice.id, mint_event_token(t1.id))
+    repo.record_event_qr_checkin("csub", alice.id, mint_event_token(t2.id))
+    repo.create_manual_checkin(
+        campus_id="csub", task=t1, student=bob, actor_subject="admin", reason="r"
+    )
+
+    checkins = repo.list_challenge_checkins(ch.id)
+    assert len(checkins) == 3
+    # Attendance counts captures by method; participation counts distinct students.
+    methods = sorted(c.method for c in checkins)
+    assert methods == ["event_qr", "event_qr", "manual"]
+    per_task_students = {}
+    for c in checkins:
+        per_task_students.setdefault(c.task_id, set()).add(c.student_id)
+    assert len(per_task_students[t1.id]) == 2  # alice + bob, distinct
+    assert len(per_task_students[t2.id]) == 1
+
+
+def test_consistent_challenge_checkins_see_a_just_written_row(repo):
+    # US-26 scenario 2 in miniature: the consistent read must include a check-in made
+    # immediately before it. (On Dynamo this is the base-table read, not the GSI.)
+    ch, (t1,) = _built_challenge(repo, titles=("W1",))
+    stu = _student(repo)
+    repo.record_event_qr_checkin("csub", stu.id, mint_event_token(t1.id))
+    rows = repo.list_challenge_checkins(ch.id, consistent=True)
+    assert [c.task_id for c in rows] == [t1.id]
+
+
+def test_list_challenge_items_and_responses(repo):
+    ch, (t1, t2) = _built_challenge(repo)
+    a = _mcq(repo, t1.id, tag="sleep")
+    b = _mcq(repo, t2.id, tag="vision")
+    stu = _student(repo)
+    repo.create_response(
+        student_id=stu.id,
+        item=a,
+        challenge_id=ch.id,
+        response="yearly",
+        score=1.0,
+        scored_by="auto",
+    )
+
+    assert {i.id for i in repo.list_challenge_items(ch.id)} == {a.id, b.id}
+    responses = repo.list_challenge_responses(ch.id)
+    assert len(responses) == 1
+    assert responses[0].assessment_item_id == a.id
+
+
+def test_count_guide_sessions_is_a_structural_zero(repo):
+    ch, _ = _built_challenge(repo, titles=("W1",))
+    # Nothing writes GuideSessions yet, but it must be a real query, not a hardcoded 0.
+    assert repo.count_guide_sessions(ch.id) == 0
+
+
+def test_get_student_subjects_resolves_the_subject(repo):
+    alice = _student(repo, "alice@csub.edu")
+    bob = _student(repo, "bob@csub.edu")
+    got = repo.get_student_subjects([alice.id, bob.id])
+    assert got[alice.id] == "alice@csub.edu"
+    assert got[bob.id] == "bob@csub.edu"
+    assert repo.get_student_subjects([]) == {}
+
+
+def test_report_reads_are_challenge_scoped(repo):
+    ch, (t1,) = _built_challenge(repo, titles=("W1",))
+    stu = _student(repo)
+    repo.enroll(stu.id, ch.id)
+    repo.record_event_qr_checkin("csub", stu.id, mint_event_token(t1.id))
+
+    other = _challenge(repo, name="Other", semester="S2", publish=False)
+    assert repo.count_enrollments(other.id) == 0
+    assert repo.list_challenge_checkins(other.id) == []
+    assert repo.list_challenge_checkins(other.id, consistent=True) == []
+    assert repo.list_challenge_items(other.id) == []
+
+
 # --- themes (FR-B4 / US-13) -------------------------------------------------
 def test_theme_create_get_and_list_sorted_by_name(repo):
     assert repo.list_themes() == []
