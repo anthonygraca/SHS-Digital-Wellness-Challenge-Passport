@@ -108,6 +108,10 @@ Resources:
             TableName: !Sub "${TablePrefix}Challenges"
         - DynamoDBReadPolicy:
             TableName: !Sub "${TablePrefix}Tasks"
+        # Read-only: the passport resolves its challenge's theme on every build so an
+        # admin's re-skin shows up on the student's next fetch (FR-B4 / US-13).
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Themes"
       Events:
         Passport:
           Type: HttpApi
@@ -145,6 +149,25 @@ Resources:
           Type: HttpApi
           Properties:
             Path: /api/challenges
+            Method: ANY
+
+  ThemesFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.functions.themes.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}Themes"
+      Events:
+        ThemesRoot:
+          Type: HttpApi
+          Properties:
+            Path: /api/themes
+            Method: ANY
+        Themes:
+          Type: HttpApi
+          Properties:
+            Path: /api/themes/{proxy+}
             Method: ANY
 
   HealthFn:
@@ -304,6 +327,21 @@ Resources:
           AttributeType: S
       KeySchema:
         - AttributeName: name
+          KeyType: HASH
+
+  # Global re-skin presets (FR-B4 / US-13). The id is a slug that doubles as the
+  # frontend data-theme value; the row is looked up by id on every passport build
+  # and listed (a Scan) from the admin theme picker. No GSI: <20 rows, no query need.
+  ThemesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TablePrefix}Themes"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
           KeyType: HASH
 
 Outputs:

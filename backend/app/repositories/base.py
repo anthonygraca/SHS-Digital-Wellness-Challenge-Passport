@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         EnrollmentDTO,
         StudentDTO,
         TaskDTO,
+        ThemeDTO,
     )
     from app.schemas.challenge import (
         AssessmentItemUpdate,
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
         TaskReorder,
         TaskUpdate,
     )
+    from app.schemas.theme import ThemeCreate, ThemeUpdate
     from app.services.passport import PassportView
 
 # Student identity is an int PK on the SQL path and a "<campus>#<sso>" string on the
@@ -89,6 +91,12 @@ class Repository(Protocol):
     def get_or_create_student(
         self, campus_id: str, sso_subject: str, affiliation: str
     ) -> StudentDTO: ...
+
+    # --- Themes (global re-skin presets, FR-B4 / US-13) ---------------------
+    def list_themes(self) -> list[ThemeDTO]: ...
+    def get_theme(self, theme_id: str) -> ThemeDTO | None: ...
+    def create_theme(self, data: ThemeCreate) -> ThemeDTO: ...
+    def update_theme(self, theme_id: str, data: ThemeUpdate) -> ThemeDTO | None: ...
 
     # --- Passport (derived reads + check-in writes) -------------------------
     def build_passport(

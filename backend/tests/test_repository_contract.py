@@ -21,10 +21,12 @@ from app.db import Base
 from app.repositories.sqlalchemy_repo import SqlAlchemyRepository
 from app.schemas.challenge import (
     ChallengeCreate,
+    ChallengeUpdate,
     MCQCreate,
     TaskCreate,
     TaskReorder,
 )
+from app.schemas.theme import ThemeCreate, ThemeUpdate
 from app.services.passport import DuplicateCheckIn, InvalidEventToken
 from app.services.qr import mint_event_token
 from tests.ddb_support import dynamo_backend, set_env
@@ -91,6 +93,18 @@ def _built_challenge(repo, titles=("Week 1", "Week 2")):
 
 def _student(repo, sso="stu@csub.edu"):
     return repo.get_or_create_student("csub", sso, "student")
+
+
+def _theme(repo, id="stranger-things", name="Stranger Things", **kw):
+    return repo.create_theme(
+        ThemeCreate(
+            id=id,
+            name=name,
+            palette={"primary": "#ff4438"},
+            logo_url="https://cdn.example.edu/logo.png",
+            **kw,
+        )
+    )
 
 
 # --- challenges -------------------------------------------------------------
@@ -233,3 +247,64 @@ def test_completed_tasks_are_scoped_to_the_student(repo):
     assert [w.status for w in bob_view.weeks] == ["available"]
     alice_view = repo.build_passport("csub", alice.id)
     assert [w.status for w in alice_view.weeks] == ["complete"]
+
+
+# --- themes (FR-B4 / US-13) -------------------------------------------------
+def test_theme_create_get_and_list_sorted_by_name(repo):
+    assert repo.list_themes() == []
+    created = repo.create_theme(
+        ThemeCreate(
+            id="stranger-things", name="Stranger Things", palette={"primary": "#f43"}
+        )
+    )
+    assert created.id == "stranger-things"
+
+    got = repo.get_theme("stranger-things")
+    assert got is not None and got.name == "Stranger Things"
+    assert got.palette == {"primary": "#f43"}
+    assert repo.get_theme("does-not-exist") is None
+
+    _theme(repo, id="aardvark", name="Aardvark")
+    assert [t.name for t in repo.list_themes()] == ["Aardvark", "Stranger Things"]
+
+
+def test_theme_update_is_partial_and_can_clear_a_field(repo):
+    _theme(repo)  # logo_url set, tagline empty
+
+    changed = repo.update_theme(
+        "stranger-things", ThemeUpdate(tagline="The gate is open.")
+    )
+    assert changed.tagline == "The gate is open."
+    assert changed.name == "Stranger Things"  # untouched
+    assert changed.logo_url == "https://cdn.example.edu/logo.png"  # untouched
+
+    # A field sent as null clears it; unsent fields keep the earlier change.
+    cleared = repo.update_theme("stranger-things", ThemeUpdate(logo_url=None))
+    assert cleared.logo_url is None
+    assert cleared.tagline == "The gate is open."
+
+    assert repo.update_theme("nope", ThemeUpdate(name="x")) is None
+
+
+def test_passport_carries_the_resolved_theme(repo):
+    _theme(repo)
+    ch = _challenge(repo, publish=False)
+    repo.add_task(ch.id, TaskCreate(title="W1"))
+    repo.update_challenge("csub", ch.id, ChallengeUpdate(theme_id="stranger-things"))
+    repo.publish_challenge("csub", ch.id)
+    stu = _student(repo)
+
+    view = repo.build_passport("csub", stu.id)
+    assert view.theme == "stranger-things"
+    assert view.theme_config is not None
+    assert view.theme_config.id == "stranger-things"
+    assert view.theme_config.palette["primary"] == "#ff4438"
+
+
+def test_passport_theme_config_is_none_without_a_theme(repo):
+    # A challenge with no theme_id resolves to the default skin (None), not an error.
+    _built_challenge(repo, titles=("W1",))
+    stu = _student(repo)
+    view = repo.build_passport("csub", stu.id)
+    assert view.theme == ""
+    assert view.theme_config is None

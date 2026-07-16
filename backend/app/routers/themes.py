@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 
 from app.auth.deps import require_admin
-from app.db import get_db
+from app.repositories.base import Repository, get_repo
 from app.schemas.theme import ThemeCreate, ThemeOut, ThemeUpdate
-from app.services import themes as svc
 
 router = APIRouter(prefix="/api/themes", tags=["themes"])
 
 
-def _get_theme_or_404(db: Session, theme_id: str):
-    theme = svc.get_theme(db, theme_id)
+def _get_theme_or_404(repo: Repository, theme_id: str):
+    theme = repo.get_theme(theme_id)
     if theme is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Theme not found"
@@ -30,34 +28,34 @@ def _get_theme_or_404(db: Session, theme_id: str):
 def create_theme(
     body: ThemeCreate,
     claims: dict = Depends(require_admin),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """Add a new re-skin preset."""
-    if svc.get_theme(db, body.id) is not None:
+    if repo.get_theme(body.id) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Theme with this id already exists",
         )
-    return svc.create_theme(db, body)
+    return repo.create_theme(body)
 
 
 @router.get("", response_model=list[ThemeOut])
 def list_themes(
     claims: dict = Depends(require_admin),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """List the themes an admin can apply to a challenge."""
-    return svc.list_themes(db)
+    return repo.list_themes()
 
 
 @router.get("/{theme_id}", response_model=ThemeOut)
 def get_theme(
     theme_id: str,
     claims: dict = Depends(require_admin),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """Fetch a single theme's full configuration."""
-    return _get_theme_or_404(db, theme_id)
+    return _get_theme_or_404(repo, theme_id)
 
 
 @router.patch("/{theme_id}", response_model=ThemeOut)
@@ -65,8 +63,8 @@ def update_theme(
     theme_id: str,
     body: ThemeUpdate,
     claims: dict = Depends(require_admin),
-    db: Session = Depends(get_db),
+    repo: Repository = Depends(get_repo),
 ):
     """Edit a theme's palette, assets or copy — re-skins without a deploy (NFR-6)."""
-    theme = _get_theme_or_404(db, theme_id)
-    return svc.update_theme(db, theme, body)
+    _get_theme_or_404(repo, theme_id)
+    return repo.update_theme(theme_id, body)
