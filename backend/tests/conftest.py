@@ -14,7 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.db import Base, get_db
+from app.db import Base
 from app.main import app
 from app.models.challenge import (  # noqa: F401  (register on Base.metadata)
     AssessmentItem,
@@ -23,6 +23,8 @@ from app.models.challenge import (  # noqa: F401  (register on Base.metadata)
     Task,
 )
 from app.models.student import Student  # noqa: F401  (register on Base.metadata)
+from app.repositories.base import get_repo
+from app.repositories.sqlalchemy_repo import SqlAlchemyRepository
 
 
 @pytest.fixture
@@ -40,14 +42,14 @@ def db_sessionmaker():
 
 @pytest.fixture
 def client(db_sessionmaker):
-    def _override_get_db():
+    def _override_get_repo():
         db = db_sessionmaker()
         try:
-            yield db
+            yield SqlAlchemyRepository(db)
         finally:
             db.close()
 
-    app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_repo] = _override_get_repo
     # Plain TestClient (no context manager) so app startup/init_db does not run;
     # the fixture owns table creation on the in-memory StaticPool engine.
     yield TestClient(app)

@@ -28,6 +28,17 @@ export function QrScanner({
     let scanner: Html5Qrcode | null = null;
     let cancelled = false;
 
+    // The camera API (getUserMedia) is only exposed in a secure context — HTTPS
+    // or localhost. Served over plain HTTP from a public host, navigator.media-
+    // Devices is undefined and no permission prompt ever appears. Catch that up
+    // front so the message points at the real fix instead of "allow access".
+    if (!window.isSecureContext || !navigator.mediaDevices) {
+      setError(
+        "Camera needs a secure (HTTPS) connection — open this site via https://",
+      );
+      return;
+    }
+
     const startPromise = import("html5-qrcode").then(({ Html5Qrcode }) => {
       if (cancelled) return;
       scanner = new Html5Qrcode(REGION_ID);

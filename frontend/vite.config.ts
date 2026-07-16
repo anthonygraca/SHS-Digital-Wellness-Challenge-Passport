@@ -11,6 +11,15 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
+      // Full-page navigations to backend paths (SAML login redirect, mock IdP page,
+      // the /auth/callback landing) must reach the network — the generated service
+      // worker otherwise answers every navigation with the precached app shell, which
+      // would swallow the login round-trip. fetch()-based API calls are unaffected
+      // (the navigation fallback only matches navigations), but denylisting the API
+      // prefixes too is harmless belt-and-suspenders.
+      workbox: {
+        navigateFallbackDenylist: [/^\/auth/, /^\/api/, /^\/enrollment/, /^\/mock-idp/],
+      },
       manifest: {
         name: "SHS Wellness Passport",
         short_name: "Passport",
