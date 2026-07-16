@@ -23,10 +23,9 @@ class ContentViewCreate(BaseModel):
     camelCase to match the rest of the student-facing API (see schemas/passport.py
     — "Field names are camelCase for the SPA (no aliases)").
 
-    ``weekNo`` rather than a task id, exactly as CheckInRequest does: the passport
-    never learns task ids, and resolving the week server-side against the campus's
-    active challenge is what keeps a student from reporting a view of another
-    campus's task.
+    ``weekNo`` rather than a task id: the passport never learns task ids, and
+    resolving the week server-side against the campus's active challenge is what
+    keeps a student from reporting a view of another campus's task.
 
     Only ``week_detail`` is ever posted here in practice. ``tip`` is written
     server-side by the scan route, which knows it delivered one — see

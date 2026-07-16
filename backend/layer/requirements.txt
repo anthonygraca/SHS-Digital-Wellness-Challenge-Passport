@@ -1,0 +1,10 @@
+# Runtime dependencies bundled into the shared Lambda layer (DependenciesLayer in
+# template.yaml). boto3/botocore are provided by the Lambda Python runtime, so they
+# are intentionally NOT listed here. python3-saml/xmlsec is excluded — the mock auth
+# provider is the default and SAML is imported lazily.
+fastapi>=0.110
+mangum>=0.17
+pydantic-settings>=2.2
+pyjwt>=2.8
+python-multipart>=0.0.9
+sqlalchemy>=2.0

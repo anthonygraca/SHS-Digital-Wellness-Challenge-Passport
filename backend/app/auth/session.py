@@ -10,7 +10,7 @@ _ALG = "HS256"
 
 
 def mint_session_token(
-    *, sso_subject: str, affiliation: str, campus_id: str, student_id: int
+    *, sso_subject: str, affiliation: str, campus_id: str, student_id: int | str
 ) -> str:
     """Issue a short-lived session JWT. Claims carry no PHI."""
     settings = get_settings()

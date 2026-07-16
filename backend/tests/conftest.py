@@ -29,6 +29,8 @@ from app.models.engagement import (  # noqa: F401  (register on Base.metadata)
 )
 from app.models.student import Student  # noqa: F401  (register on Base.metadata)
 from app.models.theme import Theme  # noqa: F401  (register on Base.metadata)
+from app.repositories.base import get_repo
+from app.repositories.sqlalchemy_repo import SqlAlchemyRepository
 
 
 def pytest_bdd_apply_tag(tag, function):
@@ -60,15 +62,26 @@ def db_sessionmaker():
 
 @pytest.fixture
 def client(db_sessionmaker):
+    # One session shared by both seams for the whole test. Routes that carry the
+    # merged app forward still take either dependency: the QR-only student paths use
+    # the repo (get_repo), while the not-yet-ported admin/engagement routes (FR-D6,
+    # US-23, reports, themes) still take a raw Session (get_db). Both must resolve to
+    # the *same* in-memory data, and on a StaticPool there is exactly one underlying
+    # connection — so a second open session would deadlock SQLite's single writer.
+    # Sharing one session sidesteps that and keeps writes from one seam visible to the
+    # other within a request. (PR 2 parametrizes this fixture over sql|dynamo.)
+    session = db_sessionmaker()
+
     def _override_get_db():
-        db = db_sessionmaker()
-        try:
-            yield db
-        finally:
-            db.close()
+        yield session
+
+    def _override_get_repo():
+        yield SqlAlchemyRepository(session)
 
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_repo] = _override_get_repo
     # Plain TestClient (no context manager) so app startup/init_db does not run;
     # the fixture owns table creation on the in-memory StaticPool engine.
     yield TestClient(app)
+    session.close()
     app.dependency_overrides.clear()

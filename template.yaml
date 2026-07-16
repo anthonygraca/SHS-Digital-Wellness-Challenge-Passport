@@ -1,0 +1,317 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SHS Digital Wellness Passport — serverless backend. Four per-route Lambda
+  functions (auth / enrollment / passport / challenges) + a health probe, behind one
+  API Gateway HTTP API ($default stage), backed by one DynamoDB table per entity.
+  This HTTP API is the API-origin for the CloudFront distribution built in
+  docs/cloudfront-deploy-guide.md (everything stays same-origin).
+
+Parameters:
+  TablePrefix:
+    Type: String
+    Default: wp-
+    Description: Prefix for the DynamoDB table names (must match WP_DDB_TABLE_PREFIX).
+  AuthProvider:
+    Type: String
+    Default: mock
+    AllowedValues: [mock, saml]
+    Description: Identity provider. "mock" for the demo IdP; "saml" for a real campus IdP.
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Description: HS256 session-signing secret (32+ bytes). Keep stable across deploys.
+  QrSecret:
+    Type: String
+    NoEcho: true
+    Description: HS256 event-QR signing secret (32+ bytes), separate from JwtSecret.
+  CookieSecure:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Mark the session cookie Secure (true when served via CloudFront HTTPS).
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 15
+    MemorySize: 256
+    CodeUri: backend/
+    Layers:
+      - !Ref DependenciesLayer
+    Environment:
+      Variables:
+        WP_PERSISTENCE: dynamo
+        WP_DDB_TABLE_PREFIX: !Ref TablePrefix
+        WP_AUTH_PROVIDER: !Ref AuthProvider
+        WP_JWT_SECRET: !Ref JwtSecret
+        WP_QR_SECRET: !Ref QrSecret
+        WP_COOKIE_SECURE: !Ref CookieSecure
+
+Resources:
+  # --- Shared dependency layer (fastapi, mangum, pydantic, sqlalchemy, ...) ---
+  DependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub "${AWS::StackName}-deps"
+      ContentUri: backend/layer
+      CompatibleRuntimes:
+        - python3.12
+      RetentionPolicy: Delete
+    Metadata:
+      BuildMethod: python3.12
+
+  # --- Functions (one per route group; each gets only the tables it needs) ----
+  AuthFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.functions.auth.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}Students"
+      Events:
+        Auth:
+          Type: HttpApi
+          Properties:
+            Path: /auth/{proxy+}
+            Method: ANY
+        MockIdp:
+          Type: HttpApi
+          Properties:
+            Path: /mock-idp/{proxy+}
+            Method: ANY
+
+  EnrollmentFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.functions.enrollment.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}Enrollments"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Challenges"
+      Events:
+        Enrollment:
+          Type: HttpApi
+          Properties:
+            Path: /enrollment
+            Method: ANY
+
+  PassportFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.functions.passport.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}CheckIns"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Challenges"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TablePrefix}Tasks"
+      Events:
+        Passport:
+          Type: HttpApi
+          Properties:
+            Path: /api/passport
+            Method: ANY
+        # Scanning an event QR is the only way to check in — there is deliberately
+        # no manual /api/checkins route to bypass it.
+        CheckinScan:
+          Type: HttpApi
+          Properties:
+            Path: /api/checkins/scan
+            Method: ANY
+
+  ChallengesFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.functions.challenges.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}Challenges"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}Tasks"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}AssessmentItems"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TablePrefix}Counters"
+      Events:
+        Challenges:
+          Type: HttpApi
+          Properties:
+            Path: /api/challenges/{proxy+}
+            Method: ANY
+        ChallengesRoot:
+          Type: HttpApi
+          Properties:
+            Path: /api/challenges
+            Method: ANY
+
+  HealthFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.functions.health.handler
+      Events:
+        Health:
+          Type: HttpApi
+          Properties:
+            Path: /healthz
+            Method: GET
+
+  # --- DynamoDB tables (one per entity, on-demand) ----------------------------
+  StudentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TablePrefix}Students"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: student_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: student_id
+          KeyType: HASH
+
+  ChallengesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TablePrefix}Challenges"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: N
+        - AttributeName: campus_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+        - AttributeName: pub_campus_id
+          AttributeType: S
+        - AttributeName: published_sort
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ByCampus
+          KeySchema:
+            - AttributeName: campus_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: PublishedByCampus
+          KeySchema:
+            - AttributeName: pub_campus_id
+              KeyType: HASH
+            - AttributeName: published_sort
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  TasksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TablePrefix}Tasks"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: N
+        - AttributeName: challenge_id
+          AttributeType: N
+        - AttributeName: position
+          AttributeType: N
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ByChallenge
+          KeySchema:
+            - AttributeName: challenge_id
+              KeyType: HASH
+            - AttributeName: position
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  AssessmentItemsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TablePrefix}AssessmentItems"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: N
+        - AttributeName: task_id
+          AttributeType: N
+        - AttributeName: challenge_id
+          AttributeType: N
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ByTask
+          KeySchema:
+            - AttributeName: task_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ByChallenge
+          KeySchema:
+            - AttributeName: challenge_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  EnrollmentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TablePrefix}Enrollments"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: student_id
+          AttributeType: S
+        - AttributeName: challenge_id
+          AttributeType: N
+      KeySchema:
+        - AttributeName: student_id
+          KeyType: HASH
+        - AttributeName: challenge_id
+          KeyType: RANGE
+
+  CheckInsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TablePrefix}CheckIns"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: student_id
+          AttributeType: S
+        - AttributeName: task_id
+          AttributeType: N
+      KeySchema:
+        - AttributeName: student_id
+          KeyType: HASH
+        - AttributeName: task_id
+          KeyType: RANGE
+
+  CountersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TablePrefix}Counters"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: name
+          KeyType: HASH
+
+Outputs:
+  HttpApiUrl:
+    Description: >
+      Base URL of the HTTP API. Use its host as the second CloudFront origin
+      (docs/cloudfront-deploy-guide.md step 5).
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  HttpApiId:
+    Description: HTTP API id (the {apiId} in the execute-api origin domain).
+    Value: !Ref ServerlessHttpApi

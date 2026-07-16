@@ -183,19 +183,6 @@ class TestCounting:
 
         assert _counts(client.get(REPORT).json())["tip"] == 1
 
-    def test_a_manual_checkin_hands_out_no_tip_and_so_records_no_view(self, client):
-        """`tip` counts tips shown, which today means scans — not check-ins.
-
-        create_checkin returns a bare passport with no tip (routers/passport.py), so
-        counting it here would report content that no student was ever shown.
-        """
-        _setup(client, weeks=2)
-        _sign_in_as(client, "student", STUDENTS[0])
-        assert client.post("/api/checkins", json={"weekNo": 1}).status_code == 200
-        _sign_in_as(client, "staff", ADMIN)
-
-        assert _counts(client.get(REPORT).json()) == {"week_detail": 0, "tip": 0}
-
     def test_buckets_reconcile_with_the_total_for_real_data(self, client):
         _, task_ids = _setup(client, weeks=3)
         _view(client, 1, STUDENTS[0])

@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import require_current_student
 from app.db import get_db
+from app.repositories.base import Repository, get_repo
 from app.schemas.engagement import ContentViewCreate
 from app.schemas.passport import (
-    CheckInRequest,
     CheckInResult,
     PassportOut,
     ScanCheckInRequest,
@@ -20,9 +20,6 @@ from app.services.passport import (
     InvalidEventToken,
     PassportView,
     ThemeConfigView,
-    build_passport,
-    record_event_qr_checkin,
-    record_manual_checkin,
 )
 
 router = APIRouter()
@@ -88,7 +85,8 @@ def _to_passport_out(view: PassportView) -> PassportOut:
 
 @router.get("/api/passport", response_model=PassportOut)
 def get_passport(
-    claims: dict = Depends(require_current_student), db: Session = Depends(get_db)
+    claims: dict = Depends(require_current_student),
+    repo: Repository = Depends(get_repo),
 ):
     """The signed-in student's passport: week tiles with status + progress counts.
 
@@ -97,8 +95,8 @@ def get_passport(
     no published challenge. Serves US-5 (FR-C2, FR-C3) and the prize-eligibility
     indicator US-7 (FR-C5).
     """
-    view = build_passport(
-        db, campus_id=claims["campus_id"], student_id=claims["student_id"]
+    view = repo.build_passport(
+        campus_id=claims["campus_id"], student_id=claims["student_id"]
     )
     if view is None:
         raise HTTPException(
@@ -111,6 +109,7 @@ def get_passport(
 def scan_checkin(
     payload: ScanCheckInRequest,
     claims: dict = Depends(require_current_student),
+    repo: Repository = Depends(get_repo),
     db: Session = Depends(get_db),
 ):
     """Record an event-QR check-in from a scanned token — the UC-3 core loop (US-8).
@@ -121,10 +120,10 @@ def scan_checkin(
     or foreign token is 400; a repeat scan of a completed week is 409.
     """
     campus_id: str = claims["campus_id"]
-    student_id: int = claims["student_id"]
+    student_id = claims["student_id"]
     try:
-        task = record_event_qr_checkin(
-            db, campus_id=campus_id, student_id=student_id, token=payload.token
+        task = repo.record_event_qr_checkin(
+            campus_id=campus_id, student_id=student_id, token=payload.token
         )
     except InvalidEventToken as exc:
         raise HTTPException(
@@ -144,14 +143,14 @@ def scan_checkin(
     # never send would make the engagement report a measure of the client rather
     # than of the tip.
     #
-    # Only the scan path. A manual check-in returns a bare passport with no tip
-    # (create_checkin below), so "tip" counts tips shown, which today means scans
-    # — not check-ins.
+    # The scan is the only path that hands out a tip — the student-facing manual
+    # check-in is gone (#98, QR-only) — so "tip" counts tips shown, which is exactly
+    # the count of successful scans.
     engagement_svc.record_content_view_for_task(
         db, student_id=student_id, task=task, content_ref="tip"
     )
 
-    view = build_passport(db, campus_id=campus_id, student_id=student_id)
+    view = repo.build_passport(campus_id=campus_id, student_id=student_id)
     if view is None:
         # Unreachable in practice: the check-in only succeeds when an active
         # challenge exists, but keep the read path total.
@@ -164,34 +163,6 @@ def scan_checkin(
         weekNo=week_no,
         title=title,
     )
-
-
-@router.post("/api/checkins", response_model=PassportOut)
-def create_checkin(
-    payload: CheckInRequest,
-    claims: dict = Depends(require_current_student),
-    db: Session = Depends(get_db),
-):
-    """Record a manual check-in for a week and return the refreshed passport.
-
-    A demo stand-in for the QR scan (US-8) with manual unlock — any week can be
-    completed directly. Idempotent, so re-tapping a completed week is harmless.
-    Gated on current-student eligibility (US-2 / FR-A3), same as the read path.
-    """
-    record_manual_checkin(
-        db,
-        campus_id=claims["campus_id"],
-        student_id=claims["student_id"],
-        week_no=payload.weekNo,
-    )
-    view = build_passport(
-        db, campus_id=claims["campus_id"], student_id=claims["student_id"]
-    )
-    if view is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="No active challenge"
-        )
-    return _to_passport_out(view)
 
 
 @router.post("/api/content-views", status_code=status.HTTP_204_NO_CONTENT)

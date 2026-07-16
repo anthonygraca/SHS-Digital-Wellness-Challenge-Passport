@@ -127,10 +127,10 @@ def create_manual_checkin(
 ) -> CheckIn:
     """Record an admin-marked completion (FR-D6).
 
-    ``verified_by`` is set to the acting admin — note ``method="manual"`` alone
-    does not identify an admin override, since a student's own passport check-in
-    also writes "manual" (passport.py). verified_by plus an audit row is what
-    distinguishes the two.
+    ``verified_by`` is set to the acting admin. Since the student-facing manual
+    check-in was removed (#98, QR-only) — a student now completes a task only by
+    scanning, which writes ``method="event_qr"`` — ``method="manual"`` is written
+    only by an admin override, and every one leaves an audit row beside it.
 
     Raises ValueError if the student already has a check-in for this task; the
     router maps that to 409. Overriding an existing one is correct_checkin.

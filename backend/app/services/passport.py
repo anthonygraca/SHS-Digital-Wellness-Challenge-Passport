@@ -119,6 +119,35 @@ def build_passport(
             ).scalars()
         )
 
+    return assemble_passport(
+        challenge_name=challenge.name,
+        theme=challenge.theme_id,
+        tasks=tasks,
+        completed_ids=completed_ids,
+        theme_config=_resolve_theme(db, challenge.theme_id),
+    )
+
+
+def assemble_passport(
+    *,
+    challenge_name: str,
+    theme: str,
+    tasks: list,
+    completed_ids: set,
+    theme_config: ThemeConfigView | None = None,
+) -> PassportView:
+    """Pure derivation of the passport view from a challenge's tasks + completions.
+
+    Backend-agnostic: ``tasks`` is any ordered sequence of objects exposing the
+    task attributes (ORM rows on the SQL path, ``TaskDTO`` on the Dynamo path), and
+    ``completed_ids`` is the set of the student's completed task ids (already scoped
+    to these tasks). Both persistence backends call this so the sequential-unlock and
+    prize-eligibility rules live in exactly one place.
+
+    ``theme_config`` is resolved by the caller (SQL: :func:`_resolve_theme`; Dynamo:
+    a Themes point-read) and threaded through unchanged, so this stays free of any
+    persistence dependency while still carrying the resolved skin (FR-B4 / US-13).
+    """
     weeks: list[WeekView] = []
     available_assigned = False
     for task in tasks:
@@ -157,9 +186,9 @@ def build_passport(
     prize_eligible = required_total > 0 and required_completed == required_total
 
     return PassportView(
-        challenge_name=challenge.name,
-        theme=challenge.theme_id,
-        theme_config=_resolve_theme(db, challenge.theme_id),
+        challenge_name=challenge_name,
+        theme=theme,
+        theme_config=theme_config,
         total_weeks=total,
         completed_weeks=completed,
         remaining_weeks=total - completed,
@@ -168,51 +197,6 @@ def build_passport(
         prize_eligible=prize_eligible,
         weeks=weeks,
     )
-
-
-def record_manual_checkin(
-    db: Session, *, campus_id: str, student_id: int, week_no: int
-) -> bool:
-    """Record a manual completion for a week — a demo stand-in for the QR scan (US-8).
-
-    "Manual unlock": deliberately applies no sequential/date gate, so any week can be
-    completed directly. Idempotent — returns False if the task is missing or the student
-    already has a check-in for it, True when a new one is recorded.
-    """
-    challenge = get_active_challenge_for_campus(db, campus_id)
-    if challenge is None:
-        return False
-
-    # `.first()`, not `.scalar_one_or_none()`: positions are kept gapless and unique
-    # by the reorder service, but no DB constraint enforces it — a duplicate must not
-    # turn a check-in into a 500.
-    task = (
-        db.execute(
-            select(Task)
-            .where(Task.challenge_id == challenge.id, Task.position == week_no)
-            .order_by(Task.id)
-        )
-        .scalars()
-        .first()
-    )
-    if task is None:
-        return False
-
-    existing = db.execute(
-        select(CheckIn).where(
-            CheckIn.student_id == student_id, CheckIn.task_id == task.id
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
-        return False
-
-    db.add(CheckIn(student_id=student_id, task_id=task.id, method="manual"))
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        return False
-    return True
 
 
 class InvalidEventToken(Exception):

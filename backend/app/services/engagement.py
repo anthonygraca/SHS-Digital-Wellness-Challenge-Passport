@@ -49,9 +49,9 @@ def record_content_view(
     own active challenge is the isolation boundary: a student cannot post a view
     of a week that is not theirs to see, whatever number they send.
 
-    Mirrors record_manual_checkin's resolution step, including the ``.first()``:
-    positions are kept gapless and unique by the reorder service but no DB
-    constraint enforces it, and a duplicate must not turn this into a 500.
+    Resolves the week to a task by position, including the ``.first()``: positions
+    are kept gapless and unique by the reorder service but no DB constraint enforces
+    it, and a duplicate must not turn this into a 500.
     """
     challenge = get_active_challenge_for_campus(db, campus_id)
     if challenge is None:

@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.models.challenge import Challenge, CheckIn, Task
 from app.models.student import Student
 from app.models.theme import Theme
+from app.services.qr import mint_event_token
 from app.services.seed import seed_demo_challenge, seed_themes
 
 
@@ -81,17 +82,6 @@ def test_passport_403_for_non_current_student(client, db_sessionmaker):
     resp = client.get("/api/passport")
     assert resp.status_code == 403
     assert resp.json()["detail"]["code"] == "not_current_student"
-
-
-def test_checkin_403_for_non_current_student(client, db_sessionmaker):
-    _seed_challenge(db_sessionmaker)
-    _sign_in(client, subject="alum@csub.edu", affiliation="alum")
-
-    resp = client.post("/api/checkins", json={"weekNo": 1})
-    assert resp.status_code == 403
-    # The gate runs before the service, so nothing is recorded.
-    with db_sessionmaker() as db:
-        assert list(db.execute(select(CheckIn)).scalars()) == []
 
 
 # --- Draft challenges stay invisible to students (US-11 authoring) ---------------
@@ -200,49 +190,6 @@ def test_passport_countdown_updates_on_new_completion(client, db_sessionmaker):
     assert _statuses(after) == ["complete"] * 4 + ["available"] + ["locked"] * 2
 
 
-# --- Manual check-in (event detail button + manual unlock) ----------------------
-
-
-def test_checkin_requires_auth(client, db_sessionmaker):
-    _seed_challenge(db_sessionmaker)
-    assert client.post("/api/checkins", json={"weekNo": 1}).status_code == 401
-
-
-def test_checkin_marks_week_complete_and_updates_counts(client, db_sessionmaker):
-    _seed_challenge(db_sessionmaker)
-    _sign_in(client)
-
-    resp = client.post("/api/checkins", json={"weekNo": 1})
-    assert resp.status_code == 200
-    body = resp.json()
-    # The refreshed passport comes back with week 1 complete and counts updated.
-    assert body["completedWeeks"] == 1
-    assert body["remainingWeeks"] == 6
-    assert _statuses(body) == ["complete", "available"] + ["locked"] * 5
-
-
-def test_checkin_manual_unlock_any_week(client, db_sessionmaker):
-    _seed_challenge(db_sessionmaker)
-    _sign_in(client)
-
-    # Week 5 is normally locked; a manual check-in still completes it.
-    body = client.post("/api/checkins", json={"weekNo": 5}).json()
-    assert body["completedWeeks"] == 1
-    assert body["weeks"][4]["status"] == "complete"
-
-
-def test_checkin_is_idempotent(client, db_sessionmaker):
-    _seed_challenge(db_sessionmaker)
-    _sign_in(client)
-
-    client.post("/api/checkins", json={"weekNo": 1})
-    body = client.post("/api/checkins", json={"weekNo": 1}).json()
-    # Re-tapping the same week does not double count.
-    assert body["completedWeeks"] == 1
-    with db_sessionmaker() as db:
-        assert len(list(db.execute(select(CheckIn)).scalars())) == 1
-
-
 # --- Multi-tenancy: a student only sees their own completions -------------------
 
 
@@ -327,13 +274,18 @@ def test_edited_theme_is_reflected_in_passport(client, db_sessionmaker):
 
 
 def test_checkin_response_carries_theme_config(client, db_sessionmaker):
-    """The refreshed passport is themed too, so a check-in never drops the skin."""
+    """The refreshed passport is themed too, so a check-in never drops the skin.
+
+    The only check-in path is now the QR scan (#98, QR-only), whose response nests
+    the refreshed passport under ``passport`` — assert the skin survives there.
+    """
     _seed_themes(db_sessionmaker)
     _seed_challenge(db_sessionmaker)
     _sign_in(client)
 
-    body = client.post("/api/checkins", json={"weekNo": 1}).json()
-    assert body["themeConfig"]["id"] == "stranger-things"
+    token = mint_event_token(_task_ids_by_week(db_sessionmaker)[1])
+    body = client.post("/api/checkins/scan", json={"token": token}).json()
+    assert body["passport"]["themeConfig"]["id"] == "stranger-things"
 
 
 def test_passport_theme_config_null_for_default_theme(client, db_sessionmaker):

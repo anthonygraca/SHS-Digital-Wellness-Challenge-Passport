@@ -14,21 +14,6 @@ export async function fetchPassport(): Promise<Passport | null> {
 }
 
 /**
- * Record a manual check-in for a week (demo stand-in for the QR scan). Returns the
- * refreshed passport so the caller can update progress, or null on failure.
- */
-export async function checkIn(weekNo: number): Promise<Passport | null> {
-  const res = await fetch(`${API_BASE}/api/checkins`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ weekNo }),
-  });
-  if (!res.ok) return null;
-  return (await res.json()) as Passport;
-}
-
-/**
  * Record that the student looked at a week's content (FR-F3 / US-23).
  *
  * Fire-and-forget by design, and the only call in this module that resolves to

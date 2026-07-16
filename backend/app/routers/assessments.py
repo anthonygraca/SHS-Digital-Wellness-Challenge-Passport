@@ -113,7 +113,7 @@ def get_week_items(
     """The knowledge-check questions on one week, with the student's own answers.
 
     Addressed by week number rather than task id: the student surface never speaks
-    task ids (cf. ``CheckInRequest.weekNo``). Identity comes from the session cookie —
+    task ids (cf. ``ContentViewCreate.weekNo``). Identity comes from the session cookie —
     401 if not signed in, 403 if the caller is not a current student (US-2 / FR-A3).
     404 when the campus has no published challenge or no such week; an empty list means
     the week simply has no knowledge check.

@@ -33,7 +33,7 @@ vi.mock("./QrScanner", () => ({
   ),
 }));
 // Partial mock: only the engagement write path is stubbed. The rest of the module
-// must stay real — the container's fetchPassport/checkIn/scanCheckIn are what these
+// must stay real — the container's fetchPassport/scanCheckIn are what these
 // tests drive through props. Without this stub, opening a week would fire a real
 // fetch at jsdom; it would be swallowed and harmless, but it would also be silent,
 // and US-23's instrumentation is worth asserting rather than assuming.
@@ -215,49 +215,41 @@ describe("PassportView prize-eligibility indicator (US-7 / FR-C5)", () => {
   });
 });
 
-describe("PassportView check-in (event detail + manual unlock)", () => {
-  it("opens a detail sheet with a check-in button when a tile is clicked", async () => {
-    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+describe("PassportView detail sheet (QR-only check-in)", () => {
+  it("opens a detail sheet whose only check-in action is the QR scanner", async () => {
+    render(<PassportView passport={passportWith(3)} onScan={vi.fn()} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
 
     const sheet = screen.getByRole("dialog");
     expect(within(sheet).getByText("Week 4 Portal")).toBeInTheDocument();
+    // No manual "Check in" button — QR is the only way in.
     expect(
-      within(sheet).getByRole("button", { name: /^check in$/i }),
+      within(sheet).queryByRole("button", { name: /^check in$/i }),
+    ).toBeNull();
+    expect(
+      within(sheet).getByRole("button", { name: /scan qr to check in/i }),
     ).toBeInTheDocument();
   });
 
-  it("checks in the selected week", async () => {
-    const onCheckIn = vi.fn().mockResolvedValue(undefined);
-    render(<PassportView passport={passportWith(3)} onCheckIn={onCheckIn} />);
+  it("opens the scanner (and closes the sheet) from the detail sheet", async () => {
+    render(<PassportView passport={passportWith(3)} onScan={vi.fn()} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
     const sheet = screen.getByRole("dialog");
     await userEvent.click(
-      within(sheet).getByRole("button", { name: /^check in$/i }),
+      within(sheet).getByRole("button", { name: /scan qr to check in/i }),
     );
 
-    expect(onCheckIn).toHaveBeenCalledTimes(1);
-    expect(onCheckIn).toHaveBeenCalledWith(4);
+    // Sheet is gone and the camera scanner (stubbed) is now mounted.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /simulate-scan/i }),
+    ).toBeInTheDocument();
   });
 
-  it("allows manual unlock: a locked week is still tappable and checkable", async () => {
-    const onCheckIn = vi.fn().mockResolvedValue(undefined);
-    render(<PassportView passport={passportWith(3)} onCheckIn={onCheckIn} />);
-
-    // Week 6 is locked, but the tile still opens and offers a check-in.
-    await userEvent.click(screen.getByRole("button", { name: /Week 6:/i }));
-    const sheet = screen.getByRole("dialog");
-    await userEvent.click(
-      within(sheet).getByRole("button", { name: /^check in$/i }),
-    );
-
-    expect(onCheckIn).toHaveBeenCalledWith(6);
-  });
-
-  it("shows a completed week as already checked in (no active check-in)", async () => {
-    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+  it("shows a completed week as already checked in (no check-in action)", async () => {
+    render(<PassportView passport={passportWith(3)} onScan={vi.fn()} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 1:/i }));
     const sheet = screen.getByRole("dialog");
@@ -265,14 +257,14 @@ describe("PassportView check-in (event detail + manual unlock)", () => {
       within(sheet).getByRole("button", { name: /checked in/i }),
     ).toBeDisabled();
     expect(
-      within(sheet).queryByRole("button", { name: /^check in$/i }),
+      within(sheet).queryByRole("button", { name: /scan qr to check in/i }),
     ).toBeNull();
   });
 
   it("renders a task with no date window instead of crashing (US-11 allows it)", async () => {
     const passport = passportWith(3);
     passport.weeks[3] = { ...passport.weeks[3], dateStart: null, dateEnd: null };
-    render(<PassportView passport={passport} onCheckIn={vi.fn()} />);
+    render(<PassportView passport={passport} onScan={vi.fn()} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
     const sheet = screen.getByRole("dialog");
@@ -292,7 +284,7 @@ describe("PassportView knowledge check (US-18 / FR-E4)", () => {
 
   it("shows the tapped week's knowledge check inside the sheet", async () => {
     assessments.fetchWeekItems.mockResolvedValue([mcq]);
-    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+    render(<PassportView passport={passportWith(3)} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
 
@@ -303,14 +295,15 @@ describe("PassportView knowledge check (US-18 / FR-E4)", () => {
   });
 
   it("still offers check-in for a week with no knowledge check", async () => {
-    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+    render(<PassportView passport={passportWith(3)} onScan={vi.fn()} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
 
-    // The quiz does not gate the core loop: no questions, no missing button.
+    // The quiz does not gate the core loop: no questions, no missing button. The
+    // only check-in affordance is the QR scan (#98, QR-only).
     const sheet = screen.getByRole("dialog");
     expect(
-      within(sheet).getByRole("button", { name: /^check in$/i }),
+      within(sheet).getByRole("button", { name: /scan qr to check in/i }),
     ).toBeInTheDocument();
     expect(within(sheet).queryByText(/knowledge check/i)).not.toBeInTheDocument();
   });
@@ -365,7 +358,7 @@ describe("Passport theming (US-13 / FR-B4)", () => {
 
     render(
       <ThemeProvider>
-        <Passport fetchData={fetchData} checkInFn={vi.fn()} />
+        <Passport fetchData={fetchData} />
       </ThemeProvider>,
     );
 
@@ -384,7 +377,7 @@ describe("Passport eligibility gate (US-2 / FR-A3)", () => {
     sessionState.session = asSession({ isCurrentStudent: true });
     const fetchData = vi.fn().mockResolvedValue(passportWith(3));
 
-    render(<Passport fetchData={fetchData} checkInFn={vi.fn()} />);
+    render(<Passport fetchData={fetchData} />);
 
     expect(
       await screen.findByText(/3 of 7 complete, 4 remaining/i),
@@ -399,7 +392,7 @@ describe("Passport eligibility gate (US-2 / FR-A3)", () => {
     });
     const fetchData = vi.fn().mockResolvedValue(passportWith(3));
 
-    render(<Passport fetchData={fetchData} checkInFn={vi.fn()} />);
+    render(<Passport fetchData={fetchData} />);
 
     expect(
       screen.getByRole("heading", { name: /not eligible to join/i }),
@@ -411,7 +404,7 @@ describe("Passport eligibility gate (US-2 / FR-A3)", () => {
 
   it("signed-out visitor is redirected to sign-in", () => {
     sessionState.session = null;
-    render(<Passport fetchData={vi.fn()} checkInFn={vi.fn()} />);
+    render(<Passport fetchData={vi.fn()} />);
     expect(screen.getByText("redirect:/")).toBeInTheDocument();
   });
 });
@@ -516,7 +509,7 @@ describe("Passport offline viewing (US-6 / FR-C4)", () => {
   /** Seeds the snapshot the way the app does: one successful online load. */
   async function loadOnceOnline() {
     const { unmount } = render(
-      <Passport fetchData={vi.fn().mockResolvedValue(passportWith(3))} checkInFn={vi.fn()} />,
+      <Passport fetchData={vi.fn().mockResolvedValue(passportWith(3))} />,
     );
     await screen.findByText(/3 of 7 complete, 4 remaining/i);
     unmount();
@@ -527,7 +520,7 @@ describe("Passport offline viewing (US-6 / FR-C4)", () => {
     await loadOnceOnline();
 
     setOnline(false);
-    render(<Passport fetchData={vi.fn().mockRejectedValue(offline())} checkInFn={vi.fn()} />);
+    render(<Passport fetchData={vi.fn().mockRejectedValue(offline())} />);
 
     expect(
       await screen.findByText(/3 of 7 complete, 4 remaining/i),
@@ -541,7 +534,7 @@ describe("Passport offline viewing (US-6 / FR-C4)", () => {
     await loadOnceOnline();
 
     setOnline(false);
-    render(<Passport fetchData={vi.fn().mockRejectedValue(offline())} checkInFn={vi.fn()} />);
+    render(<Passport fetchData={vi.fn().mockRejectedValue(offline())} />);
 
     await screen.findByText(/3 of 7 complete, 4 remaining/i);
     expect(screen.getByRole("status", { name: /offline/i })).toBeInTheDocument();
@@ -550,7 +543,7 @@ describe("Passport offline viewing (US-6 / FR-C4)", () => {
   it("shows no indicator when the passport loaded live", async () => {
     sessionState.session = asSession({ isCurrentStudent: true });
     render(
-      <Passport fetchData={vi.fn().mockResolvedValue(passportWith(3))} checkInFn={vi.fn()} />,
+      <Passport fetchData={vi.fn().mockResolvedValue(passportWith(3))} />,
     );
 
     await screen.findByText(/3 of 7 complete, 4 remaining/i);
@@ -564,7 +557,7 @@ describe("Passport offline viewing (US-6 / FR-C4)", () => {
     sessionState.session = asSession({ isCurrentStudent: true });
     setOnline(false);
 
-    render(<Passport fetchData={vi.fn().mockRejectedValue(offline())} checkInFn={vi.fn()} />);
+    render(<Passport fetchData={vi.fn().mockRejectedValue(offline())} />);
 
     expect(await screen.findByText(/you're offline and haven't synced/i)).toBeInTheDocument();
     expect(screen.queryByText(/no active challenge yet/i)).toBeNull();
@@ -574,7 +567,7 @@ describe("Passport offline viewing (US-6 / FR-C4)", () => {
     sessionState.session = asSession({ isCurrentStudent: true });
     setOnline(false);
 
-    render(<Passport fetchData={vi.fn().mockRejectedValue(offline())} checkInFn={vi.fn()} />);
+    render(<Passport fetchData={vi.fn().mockRejectedValue(offline())} />);
 
     await waitFor(() =>
       expect(screen.queryByText(/loading your passport/i)).toBeNull(),
@@ -611,27 +604,7 @@ describe("PassportView offline action gating (US-6 / FR-C4)", () => {
     expect(onScan).not.toHaveBeenCalled();
   });
 
-  it("refuses a manual check-in offline, and records nothing", async () => {
-    const onCheckIn = vi.fn();
-    render(<PassportView passport={passportWith(3)} onCheckIn={onCheckIn} online={false} />);
-
-    await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
-    await userEvent.click(
-      within(screen.getByRole("dialog", { name: /week 4/i })).getByRole("button", {
-        name: /^check in$/i,
-      }),
-    );
-
-    const notice = await screen.findByRole("dialog", { name: /connection required/i });
-    expect(within(notice).getByRole("alert")).toHaveTextContent(
-      /checking in needs a connection/i,
-    );
-    expect(onCheckIn).not.toHaveBeenCalled();
-    // The week keeps the status the server last gave it — nothing optimistic.
-    expect(screen.getAllByText("Complete")).toHaveLength(3);
-  });
-
-  it("leaves both actions working when online", async () => {
+  it("leaves scanning working when online", async () => {
     const onScan = vi.fn();
     render(<PassportView passport={passportWith(3)} onScan={onScan} />);
 
@@ -656,11 +629,7 @@ describe("Passport container scan wiring (US-8)", () => {
     } satisfies CheckInResult);
 
     render(
-      <Passport
-        fetchData={fetchData}
-        checkInFn={vi.fn()}
-        scanCheckInFn={scanCheckInFn}
-      />,
+      <Passport fetchData={fetchData} scanCheckInFn={scanCheckInFn} />,
     );
 
     expect(
@@ -681,7 +650,7 @@ describe("Passport container scan wiring (US-8)", () => {
 
 describe("PassportView content-view instrumentation (US-23 / FR-F3)", () => {
   it("records a view when a week's detail sheet is opened", async () => {
-    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+    render(<PassportView passport={passportWith(3)} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
 
@@ -692,7 +661,7 @@ describe("PassportView content-view instrumentation (US-23 / FR-F3)", () => {
   });
 
   it("records a second view when the same week is opened again", async () => {
-    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+    render(<PassportView passport={passportWith(3)} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
     await userEvent.keyboard("{Escape}");
@@ -704,7 +673,7 @@ describe("PassportView content-view instrumentation (US-23 / FR-F3)", () => {
   });
 
   it("records nothing when no week is opened", async () => {
-    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+    render(<PassportView passport={passportWith(3)} />);
 
     // Guards against instrumenting a render rather than a read — an effect on the
     // selected week would fire here, and twice per open under StrictMode.
@@ -713,7 +682,7 @@ describe("PassportView content-view instrumentation (US-23 / FR-F3)", () => {
 
   it("opens the sheet even when recording the view fails", async () => {
     passportApi.recordContentView.mockRejectedValue(new Error("offline"));
-    render(<PassportView passport={passportWith(3)} onCheckIn={vi.fn()} />);
+    render(<PassportView passport={passportWith(3)} />);
 
     await userEvent.click(screen.getByRole("button", { name: /Week 4:/i }));
 

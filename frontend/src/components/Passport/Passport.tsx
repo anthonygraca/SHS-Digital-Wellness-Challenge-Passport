@@ -8,7 +8,6 @@ import { OfflineBanner } from "../OfflineBanner/OfflineBanner";
 import { readPassportSnapshot, writePassportSnapshot } from "../../offline/snapshot";
 import { useOnlineStatus } from "../../offline/useOnlineStatus";
 import {
-  checkIn,
   fetchPassport,
   recordContentView,
   scanCheckIn,
@@ -95,19 +94,16 @@ function PrizeIndicator({
   );
 }
 
-type OnCheckIn = (weekNo: number) => Promise<void> | void;
 type OnScan = (token: string) => Promise<CheckInResult>;
 
 /** Presentational passport: progress countdown, week tiles, and a detail sheet. */
 export function PassportView({
   passport,
-  onCheckIn,
   onScan,
   online = true,
   stale = false,
 }: {
   passport: PassportData;
-  onCheckIn?: OnCheckIn;
   onScan?: OnScan;
   /** Drives the offline banner and the refusal to start a network action (US-6). */
   online?: boolean;
@@ -146,7 +142,6 @@ export function PassportView({
     : undefined;
 
   const [selectedWeekNo, setSelectedWeekNo] = useState<number | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const selectedWeek =
     selectedWeekNo != null
       ? (weeks.find((w) => w.weekNo === selectedWeekNo) ?? null)
@@ -187,25 +182,6 @@ export function PassportView({
     void recordContentView(weekNo, "week_detail");
   }
 
-  async function handleCheckIn() {
-    if (!onCheckIn || selectedWeek == null) return;
-    if (!online) {
-      // Returns before setSubmitting and before awaiting onCheckIn, so there is no
-      // request, no optimistic state, and nothing queued to replay — the week keeps
-      // the status the server last gave it.
-      setOfflineNotice(
-        "Checking in needs a connection. Nothing was recorded — reconnect and try again.",
-      );
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await onCheckIn(selectedWeek.weekNo);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   function openScanner() {
     if (!online) {
       // The scanner never mounts, so the camera never starts and onScan is
@@ -220,6 +196,14 @@ export function PassportView({
     setScanResult(null);
     setScanError(null);
     setScannerOpen(true);
+  }
+
+  // Check-in is QR-only: from a week's detail sheet, close the sheet and hand off
+  // to the same scanner. There is no manual "mark complete" — a real event QR is
+  // the sole way to complete a task.
+  function scanFromSheet() {
+    setSelectedWeekNo(null);
+    openScanner();
   }
 
   async function handleDecode(token: string) {
@@ -356,15 +340,18 @@ export function PassportView({
               <button type="button" className={styles.checkedIn} disabled>
                 <CheckCircleIcon size={18} /> Checked in
               </button>
-            ) : (
+            ) : onScan ? (
               <button
                 type="button"
                 className={styles.checkIn}
-                onClick={() => void handleCheckIn()}
-                disabled={submitting || !onCheckIn}
+                onClick={scanFromSheet}
               >
-                {submitting ? "Checking in…" : "Check in"}
+                <BoltIcon size={18} /> Scan QR to check in
               </button>
+            ) : (
+              <p className={styles.sheetCaption}>
+                Scan the event QR to check in.
+              </p>
             )}
           </div>
         </div>
@@ -450,14 +437,16 @@ export function PassportView({
 
 interface PassportProps {
   fetchData?: () => Promise<PassportData | null>;
-  checkInFn?: (weekNo: number) => Promise<PassportData | null>;
   scanCheckInFn?: (token: string) => Promise<CheckInResult>;
 }
 
 /**
  * Passport home (US-5 / FR-C2, FR-C3). Guards against being viewed signed-out,
- * loads the student's weeks + progress, and records manual check-ins. fetchData
- * and checkInFn are injectable for tests.
+ * loads the student's weeks + progress, and records event-QR check-ins. fetchData
+ * and scanCheckInFn are injectable for tests.
+ *
+ * Check-in is QR-only (US-8): a task is completed solely by scanning the event's
+ * QR code — there is no manual "mark complete" path.
  *
  * US-2 (FR-A3): current-student eligibility gate. A non-current student is blocked
  * with a friendly message and never sees a passport — checked before the fetch so
@@ -465,7 +454,6 @@ interface PassportProps {
  */
 export function Passport({
   fetchData = fetchPassport,
-  checkInFn = checkIn,
   scanCheckInFn = scanCheckIn,
 }: PassportProps) {
   const { session, loading, signOut } = useSession();
@@ -511,16 +499,11 @@ export function Passport({
   }, [session, fetchData]);
 
   // The challenge's theme rides along on every passport response, so re-skinning
-  // on a theme change (US-13) costs nothing but this hand-off — and a check-in or
-  // scan refresh re-applies it for free.
+  // on a theme change (US-13) costs nothing but this hand-off — and a scan refresh
+  // re-applies it for free.
   useEffect(() => {
     if (passport) applyTheme(passport.theme, passport.themeConfig);
   }, [passport, applyTheme]);
-
-  async function handleCheckIn(weekNo: number) {
-    const updated = await checkInFn(weekNo);
-    if (updated) setPassport(updated);
-  }
 
   // Scan flow: record the check-in, refresh progress, and let the view surface the
   // tip. Errors (duplicate / invalid token) propagate for the view to display.
@@ -546,7 +529,6 @@ export function Passport({
       ) : passport ? (
         <PassportView
           passport={passport}
-          onCheckIn={handleCheckIn}
           onScan={handleScan}
           online={online}
           stale={stale}

@@ -64,12 +64,6 @@ class PassportOut(BaseModel):
     weeks: list[WeekOut]
 
 
-class CheckInRequest(BaseModel):
-    """Body for a manual check-in: which week to complete."""
-
-    weekNo: int
-
-
 class ScanCheckInRequest(BaseModel):
     """Body for a QR check-in: the signed token decoded from the scanned event QR."""
 

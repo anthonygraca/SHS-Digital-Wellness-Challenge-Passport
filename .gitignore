@@ -1,1 +1,13 @@
 .DS_Store
+
+# SAM deploy config — contains WP_JWT_SECRET / WP_QR_SECRET in plaintext.
+samconfig.toml
+# SAM build artifacts.
+.aws-sam/
+# Self-signed certs from scripts/deploy-https.sh (EC2 path, superseded by CloudFront).
+certs/
+# Local SQLite backups.
+*.db.stale-bak
+# Python bytecode.
+__pycache__/
+*.pyc
