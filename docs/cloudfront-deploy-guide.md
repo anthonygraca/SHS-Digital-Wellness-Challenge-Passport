@@ -1,6 +1,23 @@
-# Deploy the SPA to S3 + CloudFront (Console click-through)
+# Deploy the SPA to S3 + CloudFront
 
-A beginner-friendly, step-by-step guide to putting the React/Vite frontend online.
+> **This is now Infrastructure as Code.** The S3 bucket, the CloudFront distribution, the
+> Origin Access Control, the `spa-rewrite` function and every behaviour below are
+> provisioned by `template.yaml` and created/updated by `sam deploy` — you do **not** build
+> them by hand. This document is kept as the *explanation* of what those resources are and
+> why each setting is what it is (and as a fallback for anyone doing it in the Console).
+>
+> To ship: `sam deploy` creates the distribution; then push the built SPA into its bucket
+> with `scripts/deploy-frontend.sh <bucket> <distribution-id>`, where the two ids are the
+> `FrontendBucket` and `DistributionId` stack outputs. The Console steps below map 1:1 to the
+> resources in `template.yaml`.
+>
+> ⚠️ **Cutover / PWA note.** Moving from a Console-created distribution to this stack-managed
+> one changes the `*.cloudfront.net` domain. Event **QR codes are unaffected** — they carry a
+> signed task token, not a URL. But an **installed PWA**'s `start_url` is origin-relative, so
+> anyone who already installed the app on the old domain is stranded on it. Do the cutover
+> **before** any student installs the app; after that it is a migration, not a redeploy.
+
+A step-by-step explanation of putting the React/Vite frontend online.
 
 You will deploy the built SPA (from `frontend/dist/`) to a **new private S3 bucket**
 (`shs-wellness-passport-frontend`) and serve it through **one CloudFront distribution**.
