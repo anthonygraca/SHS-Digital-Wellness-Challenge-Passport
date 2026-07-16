@@ -94,9 +94,6 @@ class Repository(Protocol):
     def build_passport(
         self, campus_id: str, student_id: StudentId
     ) -> PassportView | None: ...
-    def record_manual_checkin(
-        self, campus_id: str, student_id: StudentId, week_no: int
-    ) -> bool: ...
     def record_event_qr_checkin(
         self, campus_id: str, student_id: StudentId, token: str
     ) -> TaskDTO: ...

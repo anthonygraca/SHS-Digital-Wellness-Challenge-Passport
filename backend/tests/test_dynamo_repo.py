@@ -298,25 +298,23 @@ def test_student_and_enrollment_idempotent(repo):
     assert repo.get_enrollment(s1.id, ch.id) is not None
 
 
-def test_manual_checkin_and_passport_status(repo):
+def test_checkin_drives_passport_status(repo):
     ch = _mk_challenge(repo)
-    _add_task(repo, ch.id, "Week 1", required=True)
-    _add_task(repo, ch.id, "Week 2", required=True)
+    t1 = _add_task(repo, ch.id, "Week 1", required=True)
+    t2 = _add_task(repo, ch.id, "Week 2", required=True)
     student_id = "csub#stu@csub.edu"
 
     view = repo.build_passport("csub", student_id)
     assert [w.status for w in view.weeks] == ["available", "locked"]
     assert view.prize_eligible is False
 
-    assert repo.record_manual_checkin("csub", student_id, week_no=1) is True
-    # Idempotent: a second manual check-in of the same week is a no-op.
-    assert repo.record_manual_checkin("csub", student_id, week_no=1) is False
-
+    repo.record_event_qr_checkin("csub", student_id, mint_event_token(t1.id))
     view = repo.build_passport("csub", student_id)
     assert [w.status for w in view.weeks] == ["complete", "available"]
     assert view.completed_weeks == 1
+    assert view.prize_eligible is False
 
-    repo.record_manual_checkin("csub", student_id, week_no=2)
+    repo.record_event_qr_checkin("csub", student_id, mint_event_token(t2.id))
     view = repo.build_passport("csub", student_id)
     assert view.prize_eligible is True  # all required tasks complete
 

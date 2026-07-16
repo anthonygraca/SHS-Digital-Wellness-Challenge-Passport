@@ -3,7 +3,7 @@ import { Navigate } from "react-router-dom";
 import { useSession } from "../../auth/SessionProvider";
 import { ApiError } from "../../api/challenges";
 import { EligibilityBlocked } from "../EligibilityBlocked/EligibilityBlocked";
-import { checkIn, fetchPassport, scanCheckIn } from "../../passport/passport";
+import { fetchPassport, scanCheckIn } from "../../passport/passport";
 import type {
   CheckInResult,
   Passport as PassportData,
@@ -82,17 +82,14 @@ function PrizeIndicator({
   );
 }
 
-type OnCheckIn = (weekNo: number) => Promise<void> | void;
 type OnScan = (token: string) => Promise<CheckInResult>;
 
 /** Presentational passport: progress countdown, week tiles, and a detail sheet. */
 export function PassportView({
   passport,
-  onCheckIn,
   onScan,
 }: {
   passport: PassportData;
-  onCheckIn?: OnCheckIn;
   onScan?: OnScan;
 }) {
   const {
@@ -108,7 +105,6 @@ export function PassportView({
   const pct = totalWeeks > 0 ? (completedWeeks / totalWeeks) * 100 : 0;
 
   const [selectedWeekNo, setSelectedWeekNo] = useState<number | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const selectedWeek =
     selectedWeekNo != null
       ? (weeks.find((w) => w.weekNo === selectedWeekNo) ?? null)
@@ -129,20 +125,18 @@ export function PassportView({
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedWeek]);
 
-  async function handleCheckIn() {
-    if (!onCheckIn || selectedWeek == null) return;
-    setSubmitting(true);
-    try {
-      await onCheckIn(selectedWeek.weekNo);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   function openScanner() {
     setScanResult(null);
     setScanError(null);
     setScannerOpen(true);
+  }
+
+  // Check-in is QR-only: from a week's detail sheet, close the sheet and hand off
+  // to the same scanner. There is no manual "mark complete" — a real event QR is
+  // the sole way to complete a task.
+  function scanFromSheet() {
+    setSelectedWeekNo(null);
+    openScanner();
   }
 
   async function handleDecode(token: string) {
@@ -265,15 +259,18 @@ export function PassportView({
               <button type="button" className={styles.checkedIn} disabled>
                 <CheckCircleIcon size={18} /> Checked in
               </button>
-            ) : (
+            ) : onScan ? (
               <button
                 type="button"
                 className={styles.checkIn}
-                onClick={() => void handleCheckIn()}
-                disabled={submitting || !onCheckIn}
+                onClick={scanFromSheet}
               >
-                {submitting ? "Checking in…" : "Check in"}
+                <BoltIcon size={18} /> Scan QR to check in
               </button>
+            ) : (
+              <p className={styles.sheetCaption}>
+                Scan the event QR to check in.
+              </p>
             )}
           </div>
         </div>
@@ -332,14 +329,16 @@ export function PassportView({
 
 interface PassportProps {
   fetchData?: () => Promise<PassportData | null>;
-  checkInFn?: (weekNo: number) => Promise<PassportData | null>;
   scanCheckInFn?: (token: string) => Promise<CheckInResult>;
 }
 
 /**
  * Passport home (US-5 / FR-C2, FR-C3). Guards against being viewed signed-out,
- * loads the student's weeks + progress, and records manual check-ins. fetchData
- * and checkInFn are injectable for tests.
+ * loads the student's weeks + progress, and records event-QR check-ins. fetchData
+ * and scanCheckInFn are injectable for tests.
+ *
+ * Check-in is QR-only (US-8): a task is completed solely by scanning the event's
+ * QR code — there is no manual "mark complete" path.
  *
  * US-2 (FR-A3): current-student eligibility gate. A non-current student is blocked
  * with a friendly message and never sees a passport — checked before the fetch so
@@ -347,7 +346,6 @@ interface PassportProps {
  */
 export function Passport({
   fetchData = fetchPassport,
-  checkInFn = checkIn,
   scanCheckInFn = scanCheckIn,
 }: PassportProps) {
   const { session, loading, signOut } = useSession();
@@ -367,11 +365,6 @@ export function Passport({
     };
   }, [session, fetchData]);
 
-  async function handleCheckIn(weekNo: number) {
-    const updated = await checkInFn(weekNo);
-    if (updated) setPassport(updated);
-  }
-
   // Scan flow: record the check-in, refresh progress, and let the view surface the
   // tip. Errors (duplicate / invalid token) propagate for the view to display.
   async function handleScan(token: string): Promise<CheckInResult> {
@@ -389,11 +382,7 @@ export function Passport({
       {dataLoading ? (
         <div className={styles.center}>Loading your passport…</div>
       ) : passport ? (
-        <PassportView
-          passport={passport}
-          onCheckIn={handleCheckIn}
-          onScan={handleScan}
-        />
+        <PassportView passport={passport} onScan={handleScan} />
       ) : (
         <div className={styles.center}>
           No active challenge yet — check back soon.

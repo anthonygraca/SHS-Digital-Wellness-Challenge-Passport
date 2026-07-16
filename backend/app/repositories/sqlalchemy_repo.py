@@ -124,11 +124,6 @@ class SqlAlchemyRepository:
             self.db, campus_id=campus_id, student_id=student_id
         )
 
-    def record_manual_checkin(self, campus_id: str, student_id, week_no: int) -> bool:
-        return passport_svc.record_manual_checkin(
-            self.db, campus_id=campus_id, student_id=student_id, week_no=week_no
-        )
-
     def record_event_qr_checkin(self, campus_id: str, student_id, token: str):
         return passport_svc.record_event_qr_checkin(
             self.db, campus_id=campus_id, student_id=student_id, token=token

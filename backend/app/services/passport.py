@@ -146,51 +146,6 @@ def assemble_passport(
     )
 
 
-def record_manual_checkin(
-    db: Session, *, campus_id: str, student_id: int, week_no: int
-) -> bool:
-    """Record a manual completion for a week — a demo stand-in for the QR scan (US-8).
-
-    "Manual unlock": deliberately applies no sequential/date gate, so any week can be
-    completed directly. Idempotent — returns False if the task is missing or the student
-    already has a check-in for it, True when a new one is recorded.
-    """
-    challenge = get_active_challenge_for_campus(db, campus_id)
-    if challenge is None:
-        return False
-
-    # `.first()`, not `.scalar_one_or_none()`: positions are kept gapless and unique
-    # by the reorder service, but no DB constraint enforces it — a duplicate must not
-    # turn a check-in into a 500.
-    task = (
-        db.execute(
-            select(Task)
-            .where(Task.challenge_id == challenge.id, Task.position == week_no)
-            .order_by(Task.id)
-        )
-        .scalars()
-        .first()
-    )
-    if task is None:
-        return False
-
-    existing = db.execute(
-        select(CheckIn).where(
-            CheckIn.student_id == student_id, CheckIn.task_id == task.id
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
-        return False
-
-    db.add(CheckIn(student_id=student_id, task_id=task.id, method="manual"))
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        return False
-    return True
-
-
 class InvalidEventToken(Exception):
     """The scanned QR is missing/tampered or points at no live event for this campus."""
 

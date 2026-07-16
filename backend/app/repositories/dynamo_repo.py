@@ -568,18 +568,6 @@ class DynamoRepository:
         except self.checkins.meta.client.exceptions.ConditionalCheckFailedException:
             return False
 
-    def record_manual_checkin(self, campus_id: str, student_id, week_no: int) -> bool:
-        challenge = self.get_active_challenge(campus_id)
-        if challenge is None:
-            return False
-        tasks = self._tasks_for_challenge(challenge.id)
-        # Positions are kept gapless/unique by reorder, but nothing enforces it — pick
-        # the lowest-id match to stay deterministic, mirroring the SQL `.first()`.
-        matches = sorted((t for t in tasks if t.position == week_no), key=lambda t: t.id)
-        if not matches:
-            return False
-        return self._create_checkin(student_id, matches[0].id, "manual")
-
     def record_event_qr_checkin(self, campus_id: str, student_id, token: str) -> TaskDTO:
         task_id = verify_event_token(token)
         if task_id is None:
