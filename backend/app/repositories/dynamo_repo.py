@@ -37,6 +37,7 @@ from app.repositories.dto import (
     EnrollmentDTO,
     StudentDTO,
     TaskDTO,
+    ThemeDTO,
 )
 from app.schemas.challenge import (
     AssessmentItemUpdate,
@@ -48,10 +49,12 @@ from app.schemas.challenge import (
     TaskReorder,
     TaskUpdate,
 )
+from app.schemas.theme import ThemeCreate, ThemeUpdate
 from app.services.passport import (
     DuplicateCheckIn,
     InvalidEventToken,
     PassportView,
+    ThemeConfigView,
     assemble_passport,
 )
 from app.services.qr import verify_event_token
@@ -96,6 +99,7 @@ _TABLE_SUFFIXES = {
     "enrollments": "Enrollments",
     "checkins": "CheckIns",
     "counters": "Counters",
+    "themes": "Themes",
 }
 
 _tables_cache: dict[str, Any] | None = None
@@ -146,6 +150,7 @@ class DynamoRepository:
         self.enrollments = t["enrollments"]
         self.checkins = t["checkins"]
         self.counters = t["counters"]
+        self.themes = t["themes"]
 
     # --- helpers ------------------------------------------------------------
     def _next_id(self, name: str) -> int:
@@ -580,6 +585,94 @@ class DynamoRepository:
             created_at=_dt(raw.get("created_at")),
         )
 
+    # --- Themes -------------------------------------------------------------
+    @staticmethod
+    def _theme_dto(raw: dict) -> ThemeDTO:
+        return ThemeDTO(
+            id=raw["id"],
+            name=raw["name"],
+            palette=dict(raw.get("palette") or {}),
+            logo_url=raw.get("logo_url"),
+            hero_url=raw.get("hero_url"),
+            app_title=raw.get("app_title", "Wellness Passport"),
+            tagline=raw.get("tagline", ""),
+            copy_tone=raw.get("copy_tone", ""),
+            created_at=_dt(raw.get("created_at")),
+            updated_at=_dt(raw.get("updated_at")),
+        )
+
+    def list_themes(self) -> list[ThemeDTO]:
+        # <20 admin presets read from an admin screen: a Scan + in-app sort by name,
+        # not a GSI that would buy nothing. The one Scan in this repository.
+        items: list[dict] = []
+        resp = self.themes.scan()
+        items.extend(resp.get("Items", []))
+        while "LastEvaluatedKey" in resp:
+            resp = self.themes.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
+            items.extend(resp.get("Items", []))
+        items.sort(key=lambda r: r.get("name", ""))
+        return [self._theme_dto(r) for r in items]
+
+    def get_theme(self, theme_id: str) -> ThemeDTO | None:
+        raw = self.themes.get_item(Key={"id": theme_id}).get("Item")
+        return self._theme_dto(raw) if raw else None
+
+    def create_theme(self, data: ThemeCreate) -> ThemeDTO:
+        now = _now()
+        item = _prune(
+            {
+                "id": data.id,
+                "name": data.name,
+                "palette": data.palette,
+                "logo_url": data.logo_url,
+                "hero_url": data.hero_url,
+                "app_title": data.app_title,
+                "tagline": data.tagline,
+                "copy_tone": data.copy_tone,
+                "created_at": _enc(now),
+                "updated_at": _enc(now),
+            }
+        )
+        # attribute_not_exists so a racing create cannot silently overwrite an existing
+        # theme — the router 409s on the common case; this closes the race window.
+        self.themes.put_item(Item=item, ConditionExpression="attribute_not_exists(id)")
+        return self._theme_dto(item)
+
+    def update_theme(self, theme_id: str, data: ThemeUpdate) -> ThemeDTO | None:
+        raw = self.themes.get_item(Key={"id": theme_id}).get("Item")
+        if raw is None:
+            return None
+        # exclude_unset: only fields the admin actually sent. A field sent as null
+        # (clearing logo_url, say) becomes None here and is dropped by _prune — the
+        # attribute is removed and reads back as null, matching the SQL updater.
+        for field, value in data.model_dump(exclude_unset=True).items():
+            raw[field] = _enc(value)
+        raw["updated_at"] = _enc(_now())
+        self.themes.put_item(Item=_prune(raw))
+        return self._theme_dto(raw)
+
+    def _theme_config(self, theme_id: str) -> ThemeConfigView | None:
+        """Resolve a challenge's theme_id to the skin the passport carries (FR-B4).
+
+        Mirrors services/passport._resolve_theme on the SQL path: an empty or dangling
+        id degrades to the default skin (None), and it is read on every passport build
+        so an admin's edit shows up on the student's next fetch (US-13 scenario 3).
+        """
+        if not theme_id:
+            return None
+        raw = self.themes.get_item(Key={"id": theme_id}).get("Item")
+        if raw is None:
+            return None
+        return ThemeConfigView(
+            id=raw["id"],
+            palette=dict(raw.get("palette") or {}),
+            logo_url=raw.get("logo_url"),
+            hero_url=raw.get("hero_url"),
+            app_title=raw.get("app_title", "Wellness Passport"),
+            tagline=raw.get("tagline", ""),
+            copy_tone=raw.get("copy_tone", ""),
+        )
+
     # --- Passport -----------------------------------------------------------
     def _completed_task_ids(self, student_id, task_ids: set[int]) -> set[int]:
         # The exact (student_id, task_id) keys are known — this challenge's tasks — so
@@ -619,6 +712,7 @@ class DynamoRepository:
             theme=challenge.theme_id,
             tasks=tasks,
             completed_ids=completed,
+            theme_config=self._theme_config(challenge.theme_id),
         )
 
     def build_passport(self, campus_id: str, student_id) -> PassportView | None:

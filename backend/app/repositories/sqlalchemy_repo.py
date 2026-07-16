@@ -25,6 +25,7 @@ from app.services import challenges as challenge_svc
 from app.services import enrollment as enrollment_svc
 from app.services import passport as passport_svc
 from app.services import students as student_svc
+from app.services import themes as theme_svc
 
 
 class SqlAlchemyRepository:
@@ -117,6 +118,22 @@ class SqlAlchemyRepository:
             self.db, campus_id, sso_subject, affiliation
         )
         return student
+
+    # --- Themes -------------------------------------------------------------
+    def list_themes(self):
+        return theme_svc.list_themes(self.db)
+
+    def get_theme(self, theme_id: str):
+        return theme_svc.get_theme(self.db, theme_id)
+
+    def create_theme(self, data):
+        return theme_svc.create_theme(self.db, data)
+
+    def update_theme(self, theme_id: str, data):
+        theme = theme_svc.get_theme(self.db, theme_id)
+        if theme is None:
+            return None
+        return theme_svc.update_theme(self.db, theme, data)
 
     # --- Passport -----------------------------------------------------------
     def build_passport(self, campus_id: str, student_id):

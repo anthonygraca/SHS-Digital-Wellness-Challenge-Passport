@@ -80,3 +80,17 @@ class StudentDTO:
     sso_subject: str
     affiliation: str
     created_at: datetime
+
+
+@dataclass
+class ThemeDTO:
+    id: str
+    name: str
+    palette: dict
+    logo_url: str | None
+    hero_url: str | None
+    app_title: str
+    tagline: str
+    copy_tone: str
+    created_at: datetime
+    updated_at: datetime
